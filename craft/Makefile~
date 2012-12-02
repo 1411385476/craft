@@ -5,7 +5,7 @@ MANDIR = $(prefix)/usr/share/man
 
 all: craft
 craft: craft.o sink.o transfer.o backup.o
-	${CC} -o craft craft.o sink.o transfer.o backup.o ${LIBS} -pthread -lsqlite3
+	${CC} -o craft craft.o sink.o transfer.o backup.o ${LIBS} -pthread
 sink.o: sink.c
 	${CC} -c sink.c
 craft.o: craft.c

@@ -35,10 +35,10 @@ int main(void)
                                 break;
 		}
 		openlog(logTag,0,LOG_USER);
-		syslog(LOG_ERR,"hello we are very well; id=111, name=jim, score=100");
-		//if(x%100==0){
+		syslog(LOG_ERR,"hello we are very well; id='111', name='jim', score='100'");
+		if(x%100==0){
 			sleep(1);
-		//}
+		}
 		x++;
 	}
 //qsort((void *)list, 5, sizeof(list[0]), sort_function); 

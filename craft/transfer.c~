@@ -137,6 +137,8 @@ void sql_insert(msg)
 		//printf("You have opened a sqlite3 database named zieckey.db successfully!nCongratulations! Have fun ! ^-^ n");
 		sprintf(msg_temp,"insert into nat(`content`) values('%s');",msg);
 		sqlite3_exec( db,msg_temp, 0, 0, &pErrMsg);
+		printf("**************2");
 	}
+	printf("**************3");
 	sqlite3_close(db); //关闭
 }
