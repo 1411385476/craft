@@ -1,0 +1,38 @@
+#include <sys/time.h>
+#include <event.h>
+#include <stdio.h>
+
+void printbuf(struct evbuffer *evbuf)
+{
+    for (;;) {
+        char *buf = evbuffer_readline(evbuf);
+        printf("* buf = %p, the string = \"\e[1;33m%s\e[m\"\n", buf, buf);
+        if (buf == NULL)
+            break;
+        free(buf);
+    }
+}
+
+int main(void)
+{
+    struct evbuffer *evbuf;
+
+    evbuf = evbuffer_new();
+    if (evbuf == NULL) {
+        fprintf(stderr, "%s(): evbuffer_new() failed.\n", __func__);
+        exit(1);
+    }
+
+    /* Add "gslin" into buffer. */
+    u_char *buf1 = "gslin";
+    printf("* Add \"\e[1;33m%s\e[m\".\n", buf1);
+    evbuffer_add(evbuf, buf1, strlen(buf1));
+    printbuf(evbuf);
+
+    u_char *buf2 = " is reading.\nAnd he is at home.\nLast.";
+    printf("* Add \"\e[1;33m%s\e[m\".\n", buf2);
+    evbuffer_add(evbuf, buf2, strlen(buf2));
+    printbuf(evbuf);
+
+    evbuffer_free(evbuf);
+}
