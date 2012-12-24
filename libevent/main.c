@@ -3,6 +3,8 @@
 #include <sys/types.h>
 #include <event.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 void connection_time(int fd, short event, struct event *arg)
