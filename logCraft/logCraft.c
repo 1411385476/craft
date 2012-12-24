@@ -25,9 +25,9 @@ pthread_attr_t transfer_attr;
 pthread_t backup_tid;
 pthread_attr_t backup_attr;
 
-char log_line[512];
-char (* log_cache)[512];
-char log_cache_start[CACHESIZE][512];
+char log_line[MSGLEN];
+char (* log_cache)[MSGLEN];
+char log_cache_start[CACHESIZE][MSGLEN];
 sem_t *sem;
 int i; //the mark of cache for accept syslog
 int sock,client_fd;
@@ -89,7 +89,8 @@ void * lc_accept(){
 	l = read(client_fd,msg,MSGLEN);
 	msg[l] = '\0';
 	strcpy(*log_cache,msg);
-	printf("****************\n");
+	printf("[sink]: %s",*log_cache);
+	fflush(stdout);
 	//logcache[] = msg;
 	//sem_post(sem);  ///here you need to control rollback of cache with accept
 	if(i==CACHESIZE){
@@ -98,8 +99,6 @@ void * lc_accept(){
 		log_cache++;
 	}
 	i++;
-	printf("[sink]: %s\n",*log_cache);
-	fflush(stdout);
 }
 /*
 thread for process log (main function)
