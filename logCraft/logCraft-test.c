@@ -18,14 +18,12 @@ logCraft: a software for process Log from system
 #define oops(m,x){ perror(m); return; }
 #define CACHESIZE 10000
 #define MSGLEN 512
-#define MAXLINE 1024
 #define SOCKNAME "/var/log/log.socket"
-
-int	Debug;			/* debug flag */
+//#define LC_DEBUG 0
 char db_location[512];
 static short int bk_style;//0 nature 1 auto only 2 auto+mand
 static short int bk_action;
-static int debugging_on = 0;
+static short int lc_debug;
 pthread_t transfer_tid;
 pthread_attr_t transfer_attr;
 pthread_t backup_tid;
@@ -37,7 +35,6 @@ char log_cache_start[CACHESIZE][MSGLEN];
 sem_t *sem;
 static int i; //the mark of cache for accept syslog
 int sock;
-char * parts;//the left part of message
 /*the core function of main:
 init the arguments and environment
 get message from other process (syslog-ng / web)
@@ -57,10 +54,10 @@ void main(int argc,char *argv[])
 	i = 0;
 	/**/
 	if(argc>=2){
-		Debug = 0;
+		lc_debug = 0;
 		strcpy(db_location,argv[1]);
 	}else{
-		Debug = 0;
+		lc_debug = 0;
 		printf("please point the db for insert log\n");
 		return;
 	}
@@ -68,7 +65,6 @@ void main(int argc,char *argv[])
 	log_cache		= log_cache_start;
 	ev = (struct event *)malloc(sizeof(struct event));
 	/**/
-	parts = (char *) 0;
 	addr.sun_family	= AF_UNIX;
 	strcpy(addr.sun_path,sockname);
 	
@@ -145,87 +141,13 @@ read syslog from syslog-ng
 */
 void * lc_read(int fd, short event, struct event *arg)
 {
-    int len=0;
-	char	msg[MAXLINE];
-	len = read(fd,msg,MAXLINE-2);
-	if(Debug){
-		printf("[sink]: %s\n",msg);
-		fflush(stdout);
-	}
-
-	printchopped(msg, len+2);
-}
-
-/*chopped the log into line*/
-void printchopped(msg, len)
-	char *msg;
-	int len;
-{
-	auto int ptlngth;
-
-	auto char *start = msg,*p,*end,tmpline[MAXLINE + 1];
-
-	dprintf("Message length: %d, File descriptor: %d.\n", len, fd);
-	tmpline[0] = '\0';
-	if ( parts != (char *) 0 )
-	{
-		dprintf("Including part from messages.\n");
-		strcpy(tmpline, parts[fd]);
-		free(parts);
-		parts = (char *) 0;
-		if ( (strlen(msg) + strlen(tmpline)) > MAXLINE )
-		{
-			logerror("Cannot glue message parts together");
-			printline(tmpline);
-			start = msg;
-		}
-		else
-		{
-			dprintf("Previous: %s\n", tmpline);
-			dprintf("Next: %s\n", msg);
-			strcat(tmpline, msg);	/* length checked above */
-			printline(tmpline);
-			if ( (strlen(msg) + 1) == len )
-				return;
-			else
-				start = strchr(msg, '\0') + 1;
-		}
-	}
-
-	if ( msg[len-1] != '\0' )
-	{
-		msg[len] = '\0';
-		/*get the left of log,then storing it into parts*/
-		for(p= msg+len-1; *p != '\0' && p > msg; )
-			--p;
-		if(*p == '\0') p++;
-		ptlngth = strlen(p);
-		if ( (parts = malloc(ptlngth + 1)) == (char *) 0 )
-			logerror("Cannot allocate memory for message part.");
-		else
-		{
-			strcpy(parts, p);
-			dprintf("Saving partial msg: %s\n", parts);
-			memset(p, '\0', ptlngth);
-		}
-	}
-
-	do {
-		end = strchr(start + 1, '\0');
-		insert_cache(start);
-		start = end + 1;
-	} while ( *start != '\0' ); //'\0' because memset(p, '\0', ptlngth); and len+2
-
-	return;
-}
-
-/*insert the log into share memory*/
-void printline(msg)
-	char msg[512];
-{
-	int l=0;
+    int l=0;
+	char	msg[MSGLEN];
+	l = read(fd,msg,MSGLEN);
+	msg[l] = '\0';
 	strcpy(*log_cache,msg);
-	if(Debug){
+	sql_insert(msg);
+	if(lc_debug){
 		printf("[sink]: %s",*log_cache);
 		fflush(stdout);
 	}
@@ -237,65 +159,11 @@ void printline(msg)
 	}
 	i++;
 }
-
-/*
- * Take a raw input line, decode the message, and print the message
- * on the appropriate log files.
- */
-
-void anlanyseLog(msg)
-	char *msg;
-{
-	register char *p, *q;
-	register unsigned char c;
-	char line[MAXLINE + 1];
-	int pri;
-
-	/* test for special codes */
-	pri = DEFUPRI;
-	p = msg;
-
-	if (*p == '<') {
-		pri = 0;
-		while (isdigit(*++p))
-		{
-		   pri = 10 * pri + (*p - '0');
-		}
-		if (*p == '>')
-			++p;
-	}
-	if (pri &~ (LOG_FACMASK|LOG_PRIMASK))
-		pri = DEFUPRI;
-
-	memset (line, 0, sizeof(line));
-	q = line;
-	while ((c = *p++) && q < &line[sizeof(line) - 4]) {
-		if (c == '\n' || c == 127)
-			*q++ = ' ';
-		else if (c < 040) {
-			*q++ = '^';
-			*q++ = c ^ 0100;
-		} else
-			*q++ = c;
-	}
-	*q = '\0';
-
-	//logmsg(pri, line, SYNC_FILE);
-	return;
-}
-
-
 /*
 thread for process log (main function)
 this is the function for process syslog
 */
 void lc_transfer(){
-	char msg[MSGLEN];
-	/*get msg from cache*/
-	/*check and split the message*/
-	/*insert message into db*/
-	//sql_insert(msg);
-	/*free the log_cache*/
 }
 /*
 backup thread`s main function
@@ -319,24 +187,9 @@ void sql_insert(msg)
 		sqlite3_close(db);
 	}
 	else{ 
-		//printf("You have opened a sqlite3 database \n");
+		//printf("You have opened a sqlite3 database named zieckey.db successfully!nCongratulations! Have fun ! ^-^ n");
 		sprintf(msg_temp,"insert into nat(`content`) values('%s');",msg);
 		sqlite3_exec( db,msg_temp, 0, 0, &pErrMsg);
 	}
 	sqlite3_close(db); //关闭
-}
-static void dprintf(char *fmt, ...)
-
-{
-	va_list ap;
-
-	if ( !(Debug && debugging_on) )
-		return;
-	
-	va_start(ap, fmt);
-	vfprintf(stdout, fmt, ap);
-	va_end(ap);
-
-	fflush(stdout);
-	return;
 }
