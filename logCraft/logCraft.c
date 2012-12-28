@@ -5,6 +5,7 @@ logCraft: a software for process Log from system
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/errno.h>
 #include <stddef.h>
 #include <sys/un.h>
 #include <event.h>
@@ -13,13 +14,16 @@ logCraft: a software for process Log from system
 #include <signal.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include <syslog.h>
 #include "gnuhash.h"
 
 #define oops(m,x){ perror(m); return; }
 #define CACHESIZE 10000
 #define MSGLEN 512
 #define MAXLINE 1024
-#define SOCKNAME "/var/log/log.socket"
+#define DEFUPRI		(LOG_USER|LOG_NOTICE)
+#define DEFSPRI		(LOG_KERN|LOG_CRIT)
+#define SOCKNAME "/dev/log"
 
 int	Debug;			/* debug flag */
 char db_location[512];
@@ -46,6 +50,11 @@ void * lc_accept();
 void * lc_read(int fd, short event, struct event *arg);
 int setnonblock(int fd);
 void sql_insert(char msg[512]);
+void printchopped(char*,int);
+void printline(char msg[512]);
+static void lc_dprintf(char *, ...);
+void logerror(char *type);
+/**/
 void main(int argc,char *argv[])
 {
 	char sockname[]	= SOCKNAME;
@@ -63,6 +72,9 @@ void main(int argc,char *argv[])
 		Debug = 0;
 		printf("please point the db for insert log\n");
 		return;
+	}
+	if(argc>=3){
+		Debug = 1;
 	}
 	/**/
 	log_cache		= log_cache_start;
@@ -135,7 +147,7 @@ void * lc_accept(){
         return;
     }
 	if (setnonblock(client_fd) < 0)
-            oops("failed to set client socket non-blocking",11);
+            oops("failed to set client socket non-blocking\n",11);
 	struct event *ev = malloc(sizeof(struct event));
     event_set(ev, client_fd, EV_READ|EV_PERSIST, (void *) lc_read, ev);
     event_add(ev, NULL);
@@ -148,10 +160,10 @@ void * lc_read(int fd, short event, struct event *arg)
     int len=0;
 	char	msg[MAXLINE];
 	len = read(fd,msg,MAXLINE-2);
-	if(Debug){
-		printf("[sink]: %s\n",msg);
-		fflush(stdout);
-	}
+	//if(Debug){
+	//	printf("[sink]: %s\n",msg);
+	//	fflush(stdout);
+	//}
 
 	printchopped(msg, len+2);
 }
@@ -164,31 +176,38 @@ void printchopped(msg, len)
 	auto int ptlngth;
 
 	auto char *start = msg,*p,*end,tmpline[MAXLINE + 1];
+	
+	auto char *tempmsg[MSGLEN];
 
-	dprintf("Message length: %d, File descriptor: %d.\n", len, fd);
+	lc_dprintf("Message length: %d.\n", len);
 	tmpline[0] = '\0';
 	if ( parts != (char *) 0 )
 	{
-		dprintf("Including part from messages.\n");
-		strcpy(tmpline, parts[fd]);
+		lc_dprintf("Including part from messages.\n");
+		strcpy(tmpline, parts);
 		free(parts);
 		parts = (char *) 0;
+		printf("****************************\n");
+		printf("%s",msg);
+		printf("****************************\n");
+		printf("%s",tmpline);
+		printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
 		if ( (strlen(msg) + strlen(tmpline)) > MAXLINE )
 		{
-			logerror("Cannot glue message parts together");
+			logerror("Cannot glue message parts together\n");
 			printline(tmpline);
 			start = msg;
 		}
 		else
 		{
-			dprintf("Previous: %s\n", tmpline);
-			dprintf("Next: %s\n", msg);
+			lc_dprintf("Previous: %s\n", tmpline);
+			lc_dprintf("Next: %s\n", msg);
 			strcat(tmpline, msg);	/* length checked above */
 			printline(tmpline);
 			if ( (strlen(msg) + 1) == len )
 				return;
 			else
-				start = strchr(msg, '\0') + 1;
+				start = strchr(msg, '\n') + 1;
 		}
 	}
 
@@ -201,18 +220,18 @@ void printchopped(msg, len)
 		if(*p == '\0') p++;
 		ptlngth = strlen(p);
 		if ( (parts = malloc(ptlngth + 1)) == (char *) 0 )
-			logerror("Cannot allocate memory for message part.");
+			logerror("Cannot allocate memory for message part.\n");
 		else
 		{
 			strcpy(parts, p);
-			dprintf("Saving partial msg: %s\n", parts);
+			lc_dprintf("Saving partial msg: %s\n", parts);
 			memset(p, '\0', ptlngth);
 		}
 	}
 
 	do {
 		end = strchr(start + 1, '\0');
-		insert_cache(start);
+		printline(start);
 		start = end + 1;
 	} while ( *start != '\0' ); //'\0' because memset(p, '\0', ptlngth); and len+2
 
@@ -302,7 +321,12 @@ backup thread`s main function
 usage:which is uesd to backup those main database
 */
 void lc_backup(){
+
+
+	
 }
+
+
 /*insert sql insto db*/
 void sql_insert(msg)
 	char msg[512];
@@ -325,7 +349,25 @@ void sql_insert(msg)
 	}
 	sqlite3_close(db); //关闭
 }
-static void dprintf(char *fmt, ...)
+/*log error from logCraft*/
+void logerror(type)
+	char *type;
+{
+	char buf[100];
+
+	lc_dprintf("Called logerr, msg: %s\n", type);
+	/*produce the its error syslog we need to edit the time and host*/
+	if (errno == 0)
+		(void) snprintf(buf, sizeof(buf), "LOG_CRAFT: %s", type);
+	else
+		(void) snprintf(buf, sizeof(buf), "LOG_CRAFT: %s: %s", type, strerror(errno));
+	errno = 0;
+	//logmsg(LOG_SYSLOG|LOG_ERR, buf, LocalHostName, ADDDATE);
+	printline(buf);
+	return;
+}
+/*print the debug infomation*/
+static void lc_dprintf(char *fmt, ...)
 
 {
 	va_list ap;
