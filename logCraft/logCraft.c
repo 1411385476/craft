@@ -25,11 +25,13 @@ logCraft: a software for process Log from system
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define SOCKNAME "/var/log/log.socket"
 
-int	Debug;			/* debug flag */
+static int	Debug;			/* debug flag */
+static int debugging_on = 0;
+static int lt_debugging_on = 0;
+
 char db_location[512];
 static short int bk_style;//0 nature 1 auto only 2 auto+mand
 static short int bk_action;
-static int debugging_on = 0;
 static int cache_rflag = 0;
 pthread_t transfer_tid;
 pthread_attr_t transfer_attr;
@@ -43,23 +45,27 @@ char log_cache_start[CACHESIZE][MSGLEN];
 sem_t *sem;
 int sock;
 char * parts;//the left part of message
+
+/*function list*/
+void * lc_accept();
+void * lc_read(int fd, short event, struct event *arg);
+int setnonblock(int fd);
+void updateLog(char *msg,int len);
+void printchopped(char*,int);
+void printline(char *msg); //insert log into cache
+
+void lc_transfer();
+void sql_insert(char msg[512]);
+
+static void lc_dprintf(char *, ...);//output main info
+static void lt_dprintf(char *fmt, ...); //output transfer info
+void logerror(char *type); //output syslog
+
+
 /*the core function of main:
 init the arguments and environment
 get message from other process (syslog-ng / web)
 */
-void * lc_accept();
-void * lc_read(int fd, short event, struct event *arg);
-int setnonblock(int fd);
-void sql_insert(char msg[512]);
-void printchopped(char*,int);
-void updateLog(char *msg,int len);
-void printline(char *msg);
-static void lc_dprintf(char *, ...);
-void logerror(char *type);
-void lc_transfer();
-
-
-/*main function of logCraft*/
 void main(int argc,char *argv[])
 {
 	char sockname[]	= SOCKNAME;
@@ -78,8 +84,9 @@ void main(int argc,char *argv[])
 		return;
 	}
 	if(argc>=3){
-		Debug = 1;
-		debugging_on = 1;
+		Debug = 1; //Debug turning
+		debugging_on = 0; //output the main thread debug info
+		lt_debugging_on =1; //output the transfer thread debug info
 	}
 	/**/
 	log_cache		= log_cache_start;
@@ -114,7 +121,7 @@ void main(int argc,char *argv[])
 }
 
 /**
- * 将一个socket设置成非阻塞模式
+ * set this socket be nonblock
  */
 int
 setnonblock(int fd)
@@ -170,12 +177,7 @@ void * lc_read(int fd, short event, struct event *arg)
 	char	msg[MAXLINE+1];
 	memset(msg, 0, sizeof(msg));
 	len = read(fd,msg,MAXLINE-2);
-	if(Debug){
-		printf("^^^^^^^^^^^^^^^^^^^^^\n");
-		printf("%s\n",msg);
-		printf("~~~~~~~~~~~~~~~~~~~~~\n");
-		fflush(stdout);
-	}
+	lc_dprintf("^^^^^^^^^^^^^^^^^^^^^\n%s\n~~~~~~~~~~~~~~~~~~~~~\n",msg);
 	updateLog(msg,len);
 	printchopped(msg, len);
 }
@@ -296,10 +298,8 @@ void printline(msg)
 		strcpy(*log_cache,msg);
 		log_cache = log_cache_start + (++log_cache - log_cache_start)%CACHESIZE;
 	}
-	if(Debug){
-		printf("[sink]: %s\n",*log_cache);
-		fflush(stdout);
-	}
+	lc_dprintf("[sink]: %s\n",*log_cache);
+
 	return;
 }
 
@@ -355,7 +355,7 @@ thread for process log (main function)
 this is the function for process syslog
 */
 void lc_transfer(){
-	char *line;
+	char (*line)[512];
 	/*get msg from cache*/
 	while(1){
 		if(log_cache-log_cache_out==0){
@@ -363,7 +363,7 @@ void lc_transfer(){
 		}
 		line = log_cache_out;
 		log_cache_out = log_cache_start + (++log_cache_out - log_cache_start)%CACHESIZE;
-		lc_dprintf("%s\n",line);
+		lt_dprintf("%s\n",line);
 		/*check and split the message*/
 		
 		/*insert message into db*/
@@ -437,3 +437,20 @@ static void lc_dprintf(char *fmt, ...)
 	fflush(stdout);
 	return;
 }
+/*print the transfer log info*/
+static void lt_dprintf(char *fmt, ...)
+
+{
+	va_list ap;
+
+	if ( !(Debug && lt_debugging_on) )
+		return;
+	
+	va_start(ap, fmt);
+	vfprintf(stdout, fmt, ap);
+	va_end(ap);
+
+	fflush(stdout);
+	return;
+}
+
