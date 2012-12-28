@@ -51,6 +51,7 @@ void * lc_read(int fd, short event, struct event *arg);
 int setnonblock(int fd);
 void sql_insert(char msg[512]);
 void printchopped(char*,int);
+void updateLog(char *msg,int len);
 void printline(char msg[512]);
 static void lc_dprintf(char *, ...);
 void logerror(char *type);
@@ -164,7 +165,7 @@ void * lc_read(int fd, short event, struct event *arg)
 	//	printf("[sink]: %s\n",msg);
 	//	fflush(stdout);
 	//}
-
+	updateLog(msg,len);
 	printchopped(msg, len+2);
 }
 
@@ -176,8 +177,6 @@ void printchopped(msg, len)
 	auto int ptlngth;
 
 	auto char *start = msg,*p,*end,tmpline[MAXLINE + 1];
-	
-	auto char *tempmsg[MSGLEN];
 
 	lc_dprintf("Message length: %d.\n", len);
 	tmpline[0] = '\0';
@@ -207,7 +206,7 @@ void printchopped(msg, len)
 			if ( (strlen(msg) + 1) == len )
 				return;
 			else
-				start = strchr(msg, '\n') + 1;
+				start = strchr(msg, '\0') + 1;
 		}
 	}
 
@@ -237,7 +236,44 @@ void printchopped(msg, len)
 
 	return;
 }
+/*
+ * change \n to \0
+ * 
+ */
 
+void updateLog(msg,len)
+	char *msg;
+	int len;
+{
+	register char *p, *q;
+	register unsigned char c;
+	int mark;
+
+	p = msg;
+	/*add by lizxf*/
+	while ((c = *p)&&p<msg+len) {
+		if (c == '\n' || c == 127){
+			q = p+1;
+			if(q==msg+len){
+				*p = '\0';
+			}else if (*q == '<') {
+				mark = 0;
+				*p = ' ';
+				while (isdigit(*++q)&&q<msg+len)
+				{
+				   		mark = 2;
+				}
+				if(q==msg+len||(mark == 2&&*q == '>')){
+							*p = '\0';
+				}
+			}else{
+				*p = ' ';
+			}
+		}
+		p++;
+	}
+	return;
+}
 /*insert the log into share memory*/
 void printline(msg)
 	char msg[512];
