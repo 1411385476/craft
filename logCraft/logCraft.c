@@ -63,7 +63,8 @@ void printchopped(char*,int);
 void printline(char *msg); //insert log into cache
 
 void lc_transfer();
-void sql_insert(char msg[512]);
+void assemLog(char (*msg)[MSGLEN],char sline[MSGLEN+100]);
+void sql_insert(char (*msg)[MSGLEN]);
 
 static void lc_dprintf(char *, ...);//output main info
 static void lt_dprintf(char *fmt, ...); //output transfer info
@@ -318,21 +319,47 @@ void printline(msg)
 	return;
 }
 
+
+/*
+thread for process log (main function)
+this is the function for process syslog
+*/
+void lc_transfer(){
+	char cline[MSGLEN];
+	char sline[MSGLEN+100];
+	
+	while(1){
+		/*get msg from cache*/
+		if(log_cache-log_cache_out==0){
+			continue;
+		}
+		memset (cline, 0, sizeof(cline));
+		memset (sline, 0, sizeof(sline));
+		strcpy(cline,*log_cache_out);
+		log_cache_out = log_cache_start + (++log_cache_out - log_cache_start)%CACHESIZE;
+		lt_dprintf("%s\n",cline);
+		
+		/*check and split the message assem it into a sql sentence*/
+		assemLog(cline,sline);
+		/*insert message into db*/
+		sql_insert(sline);
+	}
+	return;
+}
+
 /*
  * Take a raw input line, decode the message, and print the message
  * on the appropriate log files.
  */
 
-void anlanyseLog(msg)
-	char *msg;
+void assemLog(msg,smsg)
+	char (*msg)[MSGLEN];
+	char (*smsg)[MSGLEN+100];
 {
 	register char *p, *q;
 	register unsigned char c;
-	char line[MAXLINE + 1];
 	int pri;
 
-	/* test for special codes */
-	pri = DEFUPRI;
 	p = msg;
 
 	if (*p == '<') {
@@ -344,15 +371,10 @@ void anlanyseLog(msg)
 		if (*p == '>')
 			++p;
 	}
-	if (pri &~ (LOG_FACMASK|LOG_PRIMASK))
-		pri = DEFUPRI;
 
-	memset (line, 0, sizeof(line));
-	q = line;
-	while ((c = *p++) && q < &line[sizeof(line) - 4]) {
-		if (c == '\n' || c == 127)
-			*q++ = ' ';
-		else if (c < 040) {
+	q = smsg;
+	while ((c = *p++) && q < (smsg+sizeof(smsg) - 4)) {
+		if (c < 040) {
 			*q++ = '^';
 			*q++ = c ^ 0100;
 		} else
@@ -360,33 +382,9 @@ void anlanyseLog(msg)
 	}
 	*q = '\0';
 
-	//logmsg(pri, line, SYNC_FILE);
 	return;
 }
 
-
-/*
-thread for process log (main function)
-this is the function for process syslog
-*/
-void lc_transfer(){
-	char (*line)[512];
-	
-	while(1){
-		/*get msg from cache*/
-		if(log_cache-log_cache_out==0){
-			continue;
-		}
-		line = log_cache_out;
-		log_cache_out = log_cache_start + (++log_cache_out - log_cache_start)%CACHESIZE;
-		lt_dprintf("%s\n",line);
-		/*check and split the message*/
-		
-		/*insert message into db*/
-		//sql_insert(msg);
-		/*free the log_cache*/
-	}
-}
 /*
 backup thread`s main function
 usage:which is uesd to backup those main database
@@ -400,10 +398,10 @@ void lc_backup(){
 
 /*insert sql insto db*/
 void sql_insert(msg)
-	char msg[512];
+	char (*msg)[MSGLEN];
 {
 	int rc,i;
-	char msg_temp[600];
+	char msg_temp[MSGLEN+100];
 	sqlite3 *db;
 	rc = sqlite3_open(db_location, &db);
 	lc_dprintf("%s",db_location);
@@ -414,8 +412,8 @@ void sql_insert(msg)
 		sqlite3_close(db);
 	}
 	else{ 
-		lc_dprintf("You have opened a sqlite3 database \n");
-		sprintf(msg_temp,"insert into nat(`content`) values('%s');",msg);
+		//lt_dprintf("You have opened a sqlite3 database \n");
+		sprintf(msg_temp,"insert into nat(`content`) values('%s');",*msg);
 		sqlite3_exec( db,msg_temp, 0, 0, &pErrMsg);
 	}
 	sqlite3_close(db); //关闭
