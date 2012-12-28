@@ -45,6 +45,14 @@ char log_cache_start[CACHESIZE][MSGLEN];
 sem_t *sem;
 int sock;
 char * parts;//the left part of message
+struct lc_statistic{
+	int lc_receive;
+	int lc_drop;
+	int lc_bad; //wrong format
+	int lc_db_succ;
+	int lc_db_fail;
+} lc_stat;
+
 
 /*function list*/
 void * lc_accept();
@@ -91,6 +99,11 @@ void main(int argc,char *argv[])
 	/**/
 	log_cache		= log_cache_start;
 	log_cache_out	= log_cache_start;
+	lc_stat.lc_receive = 0;	
+	lc_stat.lc_drop = 0;
+	lc_stat.lc_bad = 0;
+	lc_stat.lc_db_succ = 0;
+	lc_stat.lc_db_fail = 0;
 	ev = (struct event *)malloc(sizeof(struct event));
 	/**/
 	parts = (char *) 0;
@@ -291,7 +304,9 @@ void updateLog(msg,len)
 void printline(msg)
 	char * msg;
 {
+	lc_stat.lc_receive++;
 	if(log_cache_out-log_cache==1){
+		lc_stat.lc_drop++;
 		return;
 	}else{
 		memset(*log_cache,0,sizeof(*log_cache));
@@ -356,8 +371,9 @@ this is the function for process syslog
 */
 void lc_transfer(){
 	char (*line)[512];
-	/*get msg from cache*/
+	
 	while(1){
+		/*get msg from cache*/
 		if(log_cache-log_cache_out==0){
 			continue;
 		}

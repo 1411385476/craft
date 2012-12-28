@@ -11,7 +11,8 @@ int main(void)
 	int x=0;
 	//openlog("TRAFNAT",0,LOG_USER);
 	char logTag[20];
-	while(x<10000){
+	char log[512];
+	while(x<20000){
 		printf("%d ",x);
 		fflush(stdout);
 		switch(x%6){
@@ -35,9 +36,10 @@ int main(void)
                                 break;
 		}
 		openlog(logTag,0,LOG_USER);
-		syslog(LOG_ERR,"hello we are very well; id=111, name=jim, score=100");
-		//if(x%100==0){
-			sleep(1);
+		sprintf(log,"hellon hello we are very well; id=%d, name=jim, score=100",x);
+		syslog(LOG_ERR,log);
+		//if(x%1000==0){
+		//	sleep(1);
 		//}
 		x++;
 	}
