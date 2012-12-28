@@ -23,13 +23,14 @@ logCraft: a software for process Log from system
 #define MAXLINE 1024
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
-#define SOCKNAME "/dev/log"
+#define SOCKNAME "/var/log/log.socket"
 
 int	Debug;			/* debug flag */
 char db_location[512];
 static short int bk_style;//0 nature 1 auto only 2 auto+mand
 static short int bk_action;
 static int debugging_on = 0;
+static int cache_rflag = 0;
 pthread_t transfer_tid;
 pthread_attr_t transfer_attr;
 pthread_t backup_tid;
@@ -37,9 +38,9 @@ pthread_attr_t backup_attr;
 
 char log_line[MSGLEN];
 char (* log_cache)[MSGLEN];
+char (* log_cache_out)[MSGLEN];
 char log_cache_start[CACHESIZE][MSGLEN];
 sem_t *sem;
-static int i; //the mark of cache for accept syslog
 int sock;
 char * parts;//the left part of message
 /*the core function of main:
@@ -52,10 +53,13 @@ int setnonblock(int fd);
 void sql_insert(char msg[512]);
 void printchopped(char*,int);
 void updateLog(char *msg,int len);
-void printline(char msg[512]);
+void printline(char *msg);
 static void lc_dprintf(char *, ...);
 void logerror(char *type);
-/**/
+void lc_transfer();
+
+
+/*main function of logCraft*/
 void main(int argc,char *argv[])
 {
 	char sockname[]	= SOCKNAME;
@@ -64,7 +68,6 @@ void main(int argc,char *argv[])
 	time_t		now;
 	int  msgnum	= 0;
 	struct event *ev;
-	i = 0;
 	/**/
 	if(argc>=2){
 		Debug = 0;
@@ -76,9 +79,11 @@ void main(int argc,char *argv[])
 	}
 	if(argc>=3){
 		Debug = 1;
+		debugging_on = 1;
 	}
 	/**/
 	log_cache		= log_cache_start;
+	log_cache_out	= log_cache_start;
 	ev = (struct event *)malloc(sizeof(struct event));
 	/**/
 	parts = (char *) 0;
@@ -98,6 +103,9 @@ void main(int argc,char *argv[])
 	/* 设置客户端socket为非阻塞模式。 */
     if (setnonblock(sock) < 0)
             oops("failed to set logCraft socket non-blocking",4);
+	/*start the transfer thread*/
+	pthread_attr_init(&transfer_attr);
+	pthread_create(&transfer_tid,&transfer_attr,lc_transfer,NULL);
 	/*Init libevent*/
 	event_init();
 	event_set(ev,sock,EV_READ|EV_PERSIST,(void *)lc_accept,ev);
@@ -159,14 +167,17 @@ read syslog from syslog-ng
 void * lc_read(int fd, short event, struct event *arg)
 {
     int len=0;
-	char	msg[MAXLINE];
+	char	msg[MAXLINE+1];
+	memset(msg, 0, sizeof(msg));
 	len = read(fd,msg,MAXLINE-2);
-	//if(Debug){
-	//	printf("[sink]: %s\n",msg);
-	//	fflush(stdout);
-	//}
+	if(Debug){
+		printf("^^^^^^^^^^^^^^^^^^^^^\n");
+		printf("%s\n",msg);
+		printf("~~~~~~~~~~~~~~~~~~~~~\n");
+		fflush(stdout);
+	}
 	updateLog(msg,len);
-	printchopped(msg, len+2);
+	printchopped(msg, len);
 }
 
 /*chopped the log into line*/
@@ -186,11 +197,11 @@ void printchopped(msg, len)
 		strcpy(tmpline, parts);
 		free(parts);
 		parts = (char *) 0;
-		printf("****************************\n");
-		printf("%s",msg);
-		printf("****************************\n");
-		printf("%s",tmpline);
-		printf("&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");
+		lc_dprintf("###########begining#################\n");
+		lc_dprintf("%s\n",msg);
+		lc_dprintf("***********templine list************\n");
+		lc_dprintf("%s\n",tmpline);
+		lc_dprintf("&&&&&&&&&&&msg list&&&&&&&&&&&&&&&&&\n");
 		if ( (strlen(msg) + strlen(tmpline)) > MAXLINE )
 		{
 			logerror("Cannot glue message parts together\n");
@@ -276,21 +287,20 @@ void updateLog(msg,len)
 }
 /*insert the log into share memory*/
 void printline(msg)
-	char msg[512];
+	char * msg;
 {
-	int l=0;
-	strcpy(*log_cache,msg);
+	if(log_cache_out-log_cache==1){
+		return;
+	}else{
+		memset(*log_cache,0,sizeof(*log_cache));
+		strcpy(*log_cache,msg);
+		log_cache = log_cache_start + (++log_cache - log_cache_start)%CACHESIZE;
+	}
 	if(Debug){
-		printf("[sink]: %s",*log_cache);
+		printf("[sink]: %s\n",*log_cache);
 		fflush(stdout);
 	}
-	//sem_post(sem);  ///here you need to control rollback of cache with accept
-	if(i==CACHESIZE){
-		log_cache = log_cache_start;
-	}else{
-		log_cache++;
-	}
-	i++;
+	return;
 }
 
 /*
@@ -345,12 +355,21 @@ thread for process log (main function)
 this is the function for process syslog
 */
 void lc_transfer(){
-	char msg[MSGLEN];
+	char *line;
 	/*get msg from cache*/
-	/*check and split the message*/
-	/*insert message into db*/
-	//sql_insert(msg);
-	/*free the log_cache*/
+	while(1){
+		if(log_cache-log_cache_out==0){
+			continue;
+		}
+		line = log_cache_out;
+		log_cache_out = log_cache_start + (++log_cache_out - log_cache_start)%CACHESIZE;
+		lc_dprintf("%s\n",line);
+		/*check and split the message*/
+		
+		/*insert message into db*/
+		//sql_insert(msg);
+		/*free the log_cache*/
+	}
 }
 /*
 backup thread`s main function
@@ -371,7 +390,7 @@ void sql_insert(msg)
 	char msg_temp[600];
 	sqlite3 *db;
 	rc = sqlite3_open(db_location, &db);
-	printf("%s",db_location);
+	lc_dprintf("%s",db_location);
 	char * pErrMsg = 0;
 	if( rc )
 	{
@@ -379,7 +398,7 @@ void sql_insert(msg)
 		sqlite3_close(db);
 	}
 	else{ 
-		//printf("You have opened a sqlite3 database \n");
+		lc_dprintf("You have opened a sqlite3 database \n");
 		sprintf(msg_temp,"insert into nat(`content`) values('%s');",msg);
 		sqlite3_exec( db,msg_temp, 0, 0, &pErrMsg);
 	}
