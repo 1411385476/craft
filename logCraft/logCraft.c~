@@ -52,14 +52,14 @@ struct lc_statistic{
 	int lc_db_succ;
 	int lc_db_fail;
 } lc_stat;
-/*log module struct*/
+
 struct lc_module{
 	sqlite3 *db;
 	char name[30];
 	char db_location[512];
 	int db_size;
 };
-/*log sub module struct*/
+
 struct lc_subModule{
 	char subName[50];
 	struct lc_module *pModule;
