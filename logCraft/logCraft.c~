@@ -24,6 +24,10 @@ logCraft: a software for process Log from system
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define SOCKNAME "/var/log/log.socket"
+#ifndef _PATH_LOGCONF 
+#define _PATH_LOGCONF	"/home/scrooph/craft/logCraft/logCraft.conf"
+#endif
+#define CONT_LINE	1		/* Allow continuation lines */
 
 static int	Debug;			/* debug flag */
 static int debugging_on = 0;
@@ -38,10 +42,14 @@ pthread_attr_t transfer_attr;
 pthread_t backup_tid;
 pthread_attr_t backup_attr;
 
+char *ConfFile = _PATH_LOGCONF;
+char kmark[20];
+short int confStatus 	= 0;//config module
 char log_line[MSGLEN];
 char (* log_cache)[MSGLEN];
 char (* log_cache_out)[MSGLEN];
 char log_cache_start[CACHESIZE][MSGLEN];
+void cfline(char *line);
 sem_t *sem;
 int sock;
 char * parts;//the left part of message
@@ -52,20 +60,29 @@ struct lc_statistic{
 	int lc_db_succ;
 	int lc_db_fail;
 } lc_stat;
-
+/*log module struct*/
 struct lc_module{
 	sqlite3 *db;
 	char name[30];
 	char db_location[512];
-	int db_size;
+	unsigned int db_size;
+	struct lc_module *next;
+} *moduleHead,*moduleTail;
+/*the principle of parser and template of sql*/
+struct lc_subMouduleTemp{
+	char name[30];
+	char sql[MSGLEN];
 };
-
+/*log sub module struct*/
 struct lc_subModule{
 	char subName[50];
 	struct lc_module *pModule;
-};
+	struct lc_subMouduleTemp *template;
+	struct lc_subModule *next;
+} *smodule;
 
 /*function list*/
+void lc_init();
 void * lc_accept();
 void * lc_read(int fd, short event, struct event *arg);
 int setnonblock(int fd);
@@ -80,13 +97,15 @@ void sql_insert(char (*msg)[MSGLEN+100]);
 static void lc_dprintf(char *, ...);//output main info
 static void lt_dprintf(char *fmt, ...); //output transfer info
 void logerror(char *type); //output syslog
-
+/*parser the log*/
+void *parser(char symbol,char (*line)[MSGLEN],char (*lineLeft)[MSGLEN],\
+             char (*lineRight)[MSGLEN]);
 
 /*the core function of main:
 init the arguments and environment
 get message from other process (syslog-ng / web)
 */
-void main(int argc,char *argv[])
+int main(int argc,char *argv[])
 {
 	char sockname[]	= SOCKNAME;
 	struct 		sockaddr_un addr;
@@ -101,13 +120,16 @@ void main(int argc,char *argv[])
 	}else{
 		Debug = 0;
 		printf("please point the db for insert log\n");
-		return;
+		return 1;
 	}
 	if(argc>=3){
 		Debug = 1; //Debug turning
-		debugging_on = 0; //output the main thread debug info
+		debugging_on = 1; //output the main thread debug info
 		lt_debugging_on =1; //output the transfer thread debug info
 	}
+	/*initial the config*/
+	lc_init();
+	return 1;
 	/**/
 	log_cache		= log_cache_start;
 	log_cache_out	= log_cache_start;
@@ -148,8 +170,7 @@ void main(int argc,char *argv[])
 /**
  * set this socket be nonblock
  */
-int
-setnonblock(int fd)
+int setnonblock(int fd)
 {
         int flags;
 
@@ -166,19 +187,207 @@ setnonblock(int fd)
 /*
 	init the process
 */
-void lc_init(){
+void lc_init()
+{
+	register FILE *cf;
+	register char *p;
+	struct lc_subModule *sp;
+#ifdef CONT_LINE
+	char cbuf[BUFSIZ];
+	char *cline;
+#else
+	char cline[BUFSIZ];
+#endif
+	if ((cf = fopen(ConfFile, "r")) == NULL) {
+		lc_dprintf("cannot open %s.\n", ConfFile);
+		return;
+	}
+	/*
+	 *  Foreach line in the conf table, open that file.
+	 */
+#if CONT_LINE
+	cline = cbuf;
+	while (fgets(cline, sizeof(cbuf) - (cline - cbuf), cf) != NULL) {
+#else
+	while (fgets(cline, sizeof(cline), cf) != NULL) {
+#endif
+		/*
+		 * check for end-of-section, comments, strip off trailing
+		 * spaces and newline character.
+		 */
+		for (p = cline; isspace(*p); ++p);
+		if (*p == '\0' || *p == '#')
+			continue;
+#if CONT_LINE
+		strcpy(cline, p);
+#endif
+		for (p = strchr(cline, '\0'); isspace(*--p););
+#if CONT_LINE
+		if (*p == '\\') {
+			if ((p - cbuf) > BUFSIZ - 30) {
+				/* Oops the buffer is full - what now?
+				 * there is an error for unfinished config line
+				 */
+				cline = cbuf;
+			} else {
+				*p = 0;
+				cline = p;
+				continue;
+			}
+		}  else
+			cline = cbuf;
+#endif
+		*++p = '\0';
+#if CONT_LINE
+		cfline(cbuf);
+#else
+		cfline(cline);
+#endif
+	}
 
+	/* close the configuration file */
+	(void) fclose(cf);
+	/*init the hash for subModule*/
+	sp = smodule;
+	while(sp!=NULL){
+		printf("%s",sp->subName);
+		sp = sp->next;
+	}
 }
+
+void cfline(line)
+	char *line;
+{
+	char *p;//check if module
+	char *q;//
+	char *r;
+	char mName[25];
+	char dbSize[15];
+	int module_mark = 0;
+	struct lc_module *moduleTemp;
+	//lc_dprintf("%s\n",line);
+	for (q = strchr(line, '\0'); isspace(*--q););
+	if(*q=='\{'){
+		for (p = line; !isspace(*p)&&*p!='\{'; ++p);
+		strncpy(mName,line,p-line);
+		mName[p-line] = '\0';
+		//lc_dprintf("%s\n",mName);
+		/*check the mName whether illegal*/
+		if(strcmp(mName,"kmark")==0){
+			confStatus = 1;
+		}else if(strcmp(mName,"module")==0){	
+			confStatus = 2;
+		}else if(strcmp(mName,"template")==0){
+			confStatus = 3;
+		}else if(strcmp(mName,"submodule")==0){
+			confStatus = 4;
+		}else if(strcmp(mName,"backup")==0){
+			confStatus = 5;
+		}else{
+			printf ("error config file at%s in %s\n",mName,line);
+			exit(1);
+		}
+	}else if(*line=='}'){
+		if(q!=line){
+			printf ("error config file with %s\n",line);
+			exit(1);
+		}
+		return;
+	}else{
+		switch(confStatus){
+			case 1:
+				p = strchr(line,';');
+				if(p!=NULL){
+					if(p==line){
+						kmark[0] = '\0';
+					}else{
+						--p;
+					}
+					for (; isspace(*p); --p);
+					strncpy(kmark,line,p-line+1);
+					kmark[p-line+1] = '\0';
+					printf("%s\n",kmark);
+				}else{
+					printf ("error config file with %s\n",line);
+					exit(1);
+				}
+				break;
+			case 2:
+				moduleTemp = (struct lc_module *)malloc(sizeof(struct lc_module));
+				if(moduleHead==NULL){
+					moduleHead = moduleTemp;
+					moduleTail = moduleTemp;
+				}else{
+					moduleTail->next = moduleTemp;
+					moduleTail = moduleTemp;
+				}
+				p = strchr(line,';');
+				if(p!=NULL){
+					for (r = line; r<p ; ++r){
+						if(isspace(*r)){
+							if(module_mark==0){
+								strncpy(moduleTemp->name,line,r-line);
+								moduleTemp->name[r-line] = '\0';
+								module_mark = 1;
+							}
+							if(module_mark==){
+								strncpy(dbSize,line,r-line);//?????
+								dbSize[r-line] = '\0';
+								module_mark = 2;
+							}
+
+						}else if(){
+							
+						}
+					}
+					if(p==line){
+						printf ("error config file with %s\n",line);
+						exit(1);
+					}else{
+						--p;
+					}
+					for (; isspace(*p); --p);
+					strncpy(kmark,line,p-line+1);
+					kmark[p-line+1] = '\0';
+					printf("%s\n",kmark);
+					moduleTemp->db_size = atoi(dbSize);
+				}else{
+					printf ("error config file with %s\n:missing ; for end",line);
+					exit(1);
+				}
+				break;
+			case 3:
+				break;
+			case 4:
+				break;
+			case 5:
+				break;
+			default:
+				printf ("error config file with %s\n",line);
+				exit(1);
+		}
+	}
+	return;
+}
+void *parser(char symbol,char (*line)[MSGLEN],char (*lineLeft)[MSGLEN],\
+             char (*lineRight)[MSGLEN])
+{
+	
+}
+
 /*
-	callback function for process the messge from web
+ *callback function for process the messge from web
+ *Example: backup manually 
 */
-void lc_ctl(){
+void lc_ctl()
+{
 	
 }
 /*this is the function for receive syslog
 callback function
 */
-void * lc_accept(){
+void * lc_accept()
+{
 	int client_fd;	
 	struct 		sockaddr_un addr;
 	socklen_t 	addrlen = sizeof(addr);
@@ -325,7 +534,7 @@ void printline(msg)
 		strcpy(*log_cache,msg);
 		log_cache = log_cache_start + (++log_cache - log_cache_start)%CACHESIZE;
 	}
-	lc_dprintf("[sink]: %s\n",*log_cache);
+	lc_dprintf("%s\n",*log_cache);
 
 	return;
 }
@@ -351,9 +560,9 @@ void lc_transfer(){
 		lt_dprintf("%s\n",cline);
 		
 		/*check and split the message assem it into a sql sentence*/
-		assemLog(&cline,&sline);
+		//assemLog(&cline,&sline);
 		/*insert message into db*/
-		sql_insert(&sline);
+		//sql_insert(&sline);
 	}
 	return;
 }
