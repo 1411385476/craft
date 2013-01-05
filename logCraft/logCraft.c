@@ -28,10 +28,14 @@ logCraft: a software for process Log from system
 #define _PATH_LOGCONF	"/home/scrooph/craft/logCraft/logCraft.conf"
 #endif
 #define CONT_LINE	1		/* Allow continuation lines */
+#define Debug		1		/* debug flag */
+#define DEBUG_MAIN	1
+#define DEBUG_TRAN	2
+#define DEBUG_CONF	3
 
-static int	Debug;			/* debug flag */
 static int debugging_on = 0;
-static int lt_debugging_on = 0;
+
+struct hsearch_data *htab;
 
 char db_location[512];
 static short int bk_style;//0 nature 1 auto only 2 auto+mand
@@ -65,7 +69,7 @@ struct lc_module{
 	sqlite3 *db;
 	char name[30];
 	char db_location[512];
-	unsigned int db_size;
+	long long db_size;
 	struct lc_module *next;
 } *moduleHead,*moduleTail;
 /*the principle of parser and template of sql*/
@@ -75,11 +79,11 @@ struct lc_subMouduleTemp{
 };
 /*log sub module struct*/
 struct lc_subModule{
-	char subName[50];
+	char subName[30];
 	struct lc_module *pModule;
 	struct lc_subMouduleTemp *template;
 	struct lc_subModule *next;
-} *smodule;
+} *smoduleHead,*smoduleTail;
 
 /*function list*/
 void lc_init();
@@ -91,11 +95,10 @@ void printchopped(char*,int);
 void printline(char *msg); //insert log into cache
 
 void lc_transfer();
-void assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100]);
+int assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100]);
 void sql_insert(char (*msg)[MSGLEN+100]);
 
-static void lc_dprintf(char *, ...);//output main info
-static void lt_dprintf(char *fmt, ...); //output transfer info
+static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
 /*parser the log*/
 void *parser(char symbol,char (*line)[MSGLEN],char (*lineLeft)[MSGLEN],\
@@ -115,21 +118,18 @@ int main(int argc,char *argv[])
 	struct event *ev;
 	/**/
 	if(argc>=2){
-		Debug = 0;
 		strcpy(db_location,argv[1]);
 	}else{
-		Debug = 0;
 		printf("please point the db for insert log\n");
 		return 1;
 	}
 	if(argc>=3){
-		Debug = 1; //Debug turning
-		debugging_on = 1; //output the main thread debug info
-		lt_debugging_on =1; //output the transfer thread debug info
+		debugging_on = 3; //output the main thread debug info
 	}
+
 	/*initial the config*/
 	lc_init();
-	return 1;
+	//return 1;
 	/**/
 	log_cache		= log_cache_start;
 	log_cache_out	= log_cache_start;
@@ -192,6 +192,8 @@ void lc_init()
 	register FILE *cf;
 	register char *p;
 	struct lc_subModule *sp;
+	int hashlen = 0;
+	
 #ifdef CONT_LINE
 	char cbuf[BUFSIZ];
 	char *cline;
@@ -199,7 +201,7 @@ void lc_init()
 	char cline[BUFSIZ];
 #endif
 	if ((cf = fopen(ConfFile, "r")) == NULL) {
-		lc_dprintf("cannot open %s.\n", ConfFile);
+		ldprintf(DEBUG_CONF,"cannot open %s.\n", ConfFile);
 		return;
 	}
 	/*
@@ -248,11 +250,20 @@ void lc_init()
 	/* close the configuration file */
 	(void) fclose(cf);
 	/*init the hash for subModule*/
-	sp = smodule;
+	sp = smoduleHead;
 	while(sp!=NULL){
-		printf("%s",sp->subName);
+		ldprintf(DEBUG_CONF,"%s\n",sp->subName);
+		hashlen++;
 		sp = sp->next;
 	}
+	/*create hash table*/
+	hash_create(hashlen+5,htab);
+	sp = smoduleHead;
+	while(sp!=NULL){
+		hash_add(sp->subName,sp,htab);
+		sp = sp->next;
+	}
+	
 }
 
 void cfline(line)
@@ -260,18 +271,23 @@ void cfline(line)
 {
 	char *p;//check if module
 	char *q;//
-	char *r;
-	char mName[25];
+	char *r,*needle=NULL;
+	char mName[30];
 	char dbSize[15];
 	int module_mark = 0;
 	struct lc_module *moduleTemp;
-	//lc_dprintf("%s\n",line);
+	struct lc_subModule *smoduleTemp;
+	char tName[50];//template name
+	char kName[80];//the mark of a log
+	char hName[30];//name of log module | db name 
+	//ldprintf(DEBUG_CONF,"%s\n",line);
 	for (q = strchr(line, '\0'); isspace(*--q););
 	if(*q=='\{'){
+		/*Q3 if user locate the { to a new line then ??*/
 		for (p = line; !isspace(*p)&&*p!='\{'; ++p);
 		strncpy(mName,line,p-line);
 		mName[p-line] = '\0';
-		//lc_dprintf("%s\n",mName);
+		//ldprintf(DEBUG_CONF,"%s\n",mName);
 		/*check the mName whether illegal*/
 		if(strcmp(mName,"kmark")==0){
 			confStatus = 1;
@@ -288,6 +304,7 @@ void cfline(line)
 			exit(1);
 		}
 	}else if(*line=='}'){
+		/*Q2 we should check the {}*/
 		if(q!=line){
 			printf ("error config file with %s\n",line);
 			exit(1);
@@ -298,6 +315,11 @@ void cfline(line)
 			case 1:
 				p = strchr(line,';');
 				if(p!=NULL){
+					if(strchr(line,':')){
+						printf ("error config file with %s\n:not allowed kernel \
+						mark embeded with : \n",line);
+						exit(1);
+					}
 					if(p==line){
 						kmark[0] = '\0';
 					}else{
@@ -306,60 +328,110 @@ void cfline(line)
 					for (; isspace(*p); --p);
 					strncpy(kmark,line,p-line+1);
 					kmark[p-line+1] = '\0';
-					printf("%s\n",kmark);
+					ldprintf(DEBUG_CONF,"%s\n",kmark);
 				}else{
 					printf ("error config file with %s\n",line);
 					exit(1);
 				}
 				break;
 			case 2:
-				moduleTemp = (struct lc_module *)malloc(sizeof(struct lc_module));
-				if(moduleHead==NULL){
-					moduleHead = moduleTemp;
-					moduleTail = moduleTemp;
-				}else{
-					moduleTail->next = moduleTemp;
-					moduleTail = moduleTemp;
-				}
 				p = strchr(line,';');
 				if(p!=NULL){
-					for (r = line; r<p ; ++r){
-						if(isspace(*r)){
-							if(module_mark==0){
-								strncpy(moduleTemp->name,line,r-line);
-								moduleTemp->name[r-line] = '\0';
-								module_mark = 1;
-							}
-							if(module_mark==){
-								strncpy(dbSize,line,r-line);//?????
-								dbSize[r-line] = '\0';
-								module_mark = 2;
-							}
-							if(){
-							}
-						}else if(){
-							
-						}
+					moduleTemp = (struct lc_module *)malloc(sizeof(struct lc_module));
+					for (r = line; !isspace(*r)&&r<p ; ++r);
+					
+					strncpy(moduleTemp->name,line,r-line);
+					moduleTemp->name[r-line] = '\0';
+					
+					for (; isspace(*r)&&r<p ; ++r);
+					
+					for (needle = r; !isspace(*r)&&r<p ; ++r);
+					
+					strncpy(dbSize,needle,r-needle);
+					dbSize[r-needle] = '\0';
+
+					for (; isspace(*r)&&r<p ; ++r);
+					
+					for (needle = r; !isspace(*r)&&r<p ; ++r);
+
+					strncpy(moduleTemp->db_location,needle,r-needle);
+					moduleTemp->db_location[r-needle] = '\0';
+					if(!strlen(moduleTemp->name)||!strlen(dbSize)||\
+					   !strlen(moduleTemp->db_location)){
+							printf ("error config file with %s\n:missing some part",line);
+							exit(1);
 					}
-					if(p==line){
-						printf ("error config file with %s\n",line);
-						exit(1);
+					moduleTemp->db_size = atoll(dbSize);
+					/*Q1 here we need to check Legitimacy of dbSize*/
+					if(moduleHead==NULL){
+						moduleHead = moduleTemp;
+						moduleTail = moduleTemp;
 					}else{
-						--p;
+						moduleTail->next = moduleTemp;
+						moduleTail = moduleTemp;
 					}
-					for (; isspace(*p); --p);
-					strncpy(kmark,line,p-line+1);
-					kmark[p-line+1] = '\0';
-					printf("%s\n",kmark);
-					moduleTemp->db_size = atoi(dbSize);
 				}else{
 					printf ("error config file with %s\n:missing ; for end",line);
 					exit(1);
 				}
 				break;
 			case 3:
+				
 				break;
 			case 4:
+				p = strchr(line,';');
+				if(p!=NULL){
+					/*get the mark*/
+					for (r = line; !isspace(*r)&&r<p ; ++r);
+					
+					strncpy(kName,line,r-line);
+					kName[r-line] = '\0';
+					
+					for (; isspace(*r)&&r<p ; ++r);
+					/*get the log module name*/
+					for (needle = r; !isspace(*r)&&r<p ; ++r);
+					
+					strncpy(hName,needle,r-needle);
+					hName[r-needle] = '\0';
+
+					for (; isspace(*r)&&r<p ; ++r);
+					
+					for (needle = r; !isspace(*r)&&r<p ; ++r);
+
+					strncpy(tName,needle,r-needle);
+					tName[r-needle] = '\0';
+					/*check if the config is legal*/
+					if(!strlen(kName)||!strlen(hName)||!strlen(tName)){
+							printf ("error config file with %s\n:missing some part",line);
+							exit(1);
+					}
+					smoduleTemp = (struct lc_subModule *)malloc(sizeof(struct lc_subModule));
+					strcpy(smoduleTemp->subName,kName);
+					/*get the parent module*/
+					moduleTemp = moduleHead;
+					while(moduleTemp!=NULL){
+						if(strcmp(hName,moduleTemp->name)==0){
+							smoduleTemp->pModule = moduleTemp;
+						}
+						moduleTemp = moduleTemp->next;
+					}
+					if(smoduleTemp->pModule==NULL){
+						printf ("error config file with %s:log module %s does not exist!\n",line,hName);
+						exit(1);
+					}
+					/*get the template of submodule*/
+					/*insert into the link*/
+					if(smoduleHead==NULL){
+						smoduleHead = smoduleTemp;
+						smoduleTail = smoduleTemp;
+					}else{
+						smoduleTail->next = smoduleTemp;
+						smoduleTail = smoduleTemp;
+					}
+				}else{
+					printf ("error config file with %s\n:missing ; for end",line);
+					exit(1);
+				}
 				break;
 			case 5:
 				break;
@@ -412,7 +484,7 @@ void * lc_read(int fd, short event, struct event *arg)
 	char	msg[MAXLINE+1];
 	memset(msg, 0, sizeof(msg));
 	len = read(fd,msg,MAXLINE-2);
-	lc_dprintf("^^^^^^^^^^^^^^^^^^^^^\n%s\n~~~~~~~~~~~~~~~~~~~~~\n",msg);
+	ldprintf(DEBUG_MAIN,"^^^^^^^^^^^^^^^^^^^^^\n%s\n~~~~~~~~~~~~~~~~~~~~~\n",msg);
 	updateLog(msg,len);
 	printchopped(msg, len);
 }
@@ -426,19 +498,19 @@ void printchopped(msg, len)
 
 	auto char *start = msg,*p,*end,tmpline[MAXLINE + 1];
 
-	lc_dprintf("Message length: %d.\n", len);
+	ldprintf(DEBUG_MAIN,"Message length: %d.\n", len);
 	tmpline[0] = '\0';
 	if ( parts != (char *) 0 )
 	{
-		lc_dprintf("Including part from messages.\n");
+		ldprintf(DEBUG_MAIN,"Including part from messages.\n");
 		strcpy(tmpline, parts);
 		free(parts);
 		parts = (char *) 0;
-		lc_dprintf("###########begining#################\n");
-		lc_dprintf("%s\n",msg);
-		lc_dprintf("***********templine list************\n");
-		lc_dprintf("%s\n",tmpline);
-		lc_dprintf("&&&&&&&&&&&msg list&&&&&&&&&&&&&&&&&\n");
+		ldprintf(DEBUG_MAIN,"###########begining#################\n");
+		ldprintf(DEBUG_MAIN,"%s\n",msg);
+		ldprintf(DEBUG_MAIN,"***********templine list************\n");
+		ldprintf(DEBUG_MAIN,"%s\n",tmpline);
+		ldprintf(DEBUG_MAIN,"&&&&&&&&&&&msg list&&&&&&&&&&&&&&&&&\n");
 		if ( (strlen(msg) + strlen(tmpline)) > MAXLINE )
 		{
 			logerror("Cannot glue message parts together\n");
@@ -447,8 +519,8 @@ void printchopped(msg, len)
 		}
 		else
 		{
-			lc_dprintf("Previous: %s\n", tmpline);
-			lc_dprintf("Next: %s\n", msg);
+			ldprintf(DEBUG_MAIN,"Previous: %s\n", tmpline);
+			ldprintf(DEBUG_MAIN,"Next: %s\n", msg);
 			strcat(tmpline, msg);	/* length checked above */
 			printline(tmpline);
 			if ( (strlen(msg) + 1) == len )
@@ -471,7 +543,7 @@ void printchopped(msg, len)
 		else
 		{
 			strcpy(parts, p);
-			lc_dprintf("Saving partial msg: %s\n", parts);
+			ldprintf(DEBUG_MAIN,"Saving partial msg: %s\n", parts);
 			memset(p, '\0', ptlngth);
 		}
 	}
@@ -535,7 +607,7 @@ void printline(msg)
 		strcpy(*log_cache,msg);
 		log_cache = log_cache_start + (++log_cache - log_cache_start)%CACHESIZE;
 	}
-	lc_dprintf("%s\n",*log_cache);
+	ldprintf(DEBUG_MAIN,"%s\n",*log_cache);
 
 	return;
 }
@@ -558,12 +630,16 @@ void lc_transfer(){
 		memset (sline, 0, sizeof(sline));
 		strcpy(cline,*log_cache_out);
 		log_cache_out = log_cache_start + (++log_cache_out - log_cache_start)%CACHESIZE;
-		lt_dprintf("%s\n",cline);
+		ldprintf(DEBUG_TRAN,"%s\n",cline);
 		
 		/*check and split the message assem it into a sql sentence*/
-		//assemLog(&cline,&sline);
-		/*insert message into db*/
-		//sql_insert(&sline);
+		if(assemLog(&cline,&sline)){
+			/*insert message into db*/
+			//sql_insert(&sline);
+			lc_stat.lc_db_succ++;
+		}else{
+			lc_stat.lc_db_fail++;
+		}
 	}
 	return;
 }
@@ -573,14 +649,21 @@ void lc_transfer(){
  * on the appropriate log files.
  */
 
-void assemLog(msg,smsg)
+int assemLog(msg,sqlMsg)
 	char (*msg)[MSGLEN];
-	char (*smsg)[MSGLEN+100];
+	char (*sqlMsg)[MSGLEN+100];
 {
 	register char *p, *q;
 	register unsigned char c;
 	int pri;
-
+	int fac, prilev,msglen;
+	char sqlTemp[MSGLEN+100];
+	char hostname[50];
+	char nMark[20];
+	time_t	now;
+	ENTRY *ep;
+	struct lc_subModule *sp;
+	
 	p = *msg;
 
 	if (*p == '<') {
@@ -592,9 +675,9 @@ void assemLog(msg,smsg)
 		if (*p == '>')
 			++p;
 	}
-
-	q = *smsg;
-	while ((c = *p++) && q < (*smsg+sizeof(*smsg) - 4)) {
+	/*replace some symbol which has Ctrl*/
+	q = sqlTemp;
+	while ((c = *p++) && q < (sqlTemp+sizeof(sqlTemp) - 4)) {
 		if (c < 040) {
 			*q++ = '^';
 			*q++ = c ^ 0100;
@@ -602,8 +685,50 @@ void assemLog(msg,smsg)
 			*q++ = c;
 	}
 	*q = '\0';
+	q = sqlTemp;
+	msglen = strlen(sqlTemp);
+	if (!(msglen < 16 || sqlTemp[3] != ' ' || sqlTemp[6] != ' ' ||
+	    sqlTemp[9] != ':' || sqlTemp[12] != ':' || sqlTemp[15] != ' ')) {
+		q += 16;
+		msglen -= 16;
+	}else{
+		return 0;
+	}
 
-	return;
+	(void) time(&now); //timestamp
+	
+	/* extract facility and priority level */
+	fac = LOG_FAC(pri);
+	prilev = LOG_PRI(pri);
+	/*hostname*/
+	for(;isspace(*q);q++) msglen--;
+	p = q;
+	for(;!isspace(*q);q++) msglen--;
+	strncpy(hostname,p,q-p);
+	hostname[q-p] = '\0';
+	/*kernel mark/ submodule mark*/
+	for(;isspace(*q);q++) msglen--;
+	p = q;
+	for(;*q!=':';q++) msglen--;
+	strncpy(nMark,p,q-p);
+	nMark[q-p] = '\0';
+	if(strcmp(kmark,nMark)==0){
+		/*kernel mark/ submodule mark*/
+		for(q++;isspace(*q);q++) msglen--;
+		p = q;
+		for(;*q!=':';q++) msglen--;
+		strncpy(nMark,p,q-p);
+		nMark[q-p] = '\0';
+	}
+	ep = hash_find(nMark,htab);
+	if(ep){
+		sp = (struct lc_subModule *)ep->data;
+		printf("%s\n",sp->subName);
+		return 1;
+	}else{
+		lc_stat.lc_drop++;
+		return 0;
+	}
 }
 
 /*
@@ -625,7 +750,7 @@ void sql_insert(msg)
 	char msg_temp[MSGLEN+100];
 	sqlite3 *db;
 	rc = sqlite3_open(db_location, &db);
-	lc_dprintf("%s",db_location);
+	ldprintf(DEBUG_MAIN,"%s",db_location);
 	char * pErrMsg = 0;
 	if( rc )
 	{
@@ -645,7 +770,7 @@ void logerror(type)
 {
 	char buf[100];
 
-	lc_dprintf("Called logerr, msg: %s\n", type);
+	ldprintf(DEBUG_MAIN,"Called logerr, msg: %s\n", type);
 	/*produce the its error syslog we need to edit the time and host*/
 	if (errno == 0)
 		(void) snprintf(buf, sizeof(buf), "LOG_CRAFT: %s", type);
@@ -657,35 +782,18 @@ void logerror(type)
 	return;
 }
 /*print the debug infomation*/
-static void lc_dprintf(char *fmt, ...)
 
-{
+static void ldprintf(int mark,char *fmt,...){
 	va_list ap;
 
-	if ( !(Debug && debugging_on) )
+	if(Debug&&debugging_on==mark){
+		va_start(ap, fmt);
+		vfprintf(stdout, fmt, ap);
+		va_end(ap);
+
+		fflush(stdout);
 		return;
-	
-	va_start(ap, fmt);
-	vfprintf(stdout, fmt, ap);
-	va_end(ap);
-
-	fflush(stdout);
-	return;
-}
-/*print the transfer log info*/
-static void lt_dprintf(char *fmt, ...)
-
-{
-	va_list ap;
-
-	if ( !(Debug && lt_debugging_on) )
+	}else{
 		return;
-	
-	va_start(ap, fmt);
-	vfprintf(stdout, fmt, ap);
-	va_end(ap);
-
-	fflush(stdout);
-	return;
+	}
 }
-

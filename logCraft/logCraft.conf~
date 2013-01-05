@@ -3,14 +3,15 @@ kmark{
 }
 module{
 SECURITY 10240000 /var/log/security.db;
-CONFIG 10240000 /var/log/config.db;
-TRAFFIC 10240000 /var/log/security.db;
-AUDIT 10240000 /var/log/security.db;
+CONFIG 102400000 /var/log/config.db;
+TRAFFIC 1024000000 /var/log/security.db;
+AUDIT 10240000000 /var/log/security.db;
+sfsfs 102a sfsf;
 }
 template template2{
 	parser('@',$MSG,$MSG1,$MSG2);
 	parser(' ',$MSG2,$MSG3,$MSG4);
-	sql("insert into config(`cid`,`datetime`,`host`,`priority`,`facility`, \
+	sql("insert into config(`cid`,`datetime`,`host`,`priority`,`facility`,\
 	`user`,`module`,`content`) values('',$datetime,$host,$PRI,$FAC,$MSG1,$MSG3,$MSG4);");
 }
 template template1{
@@ -24,7 +25,7 @@ template template5{
 }
 submodule{
 SECURITY-ATTACK SECURITY template1;
-CONFIG-WARNING CONFIG template2;
+CONFIG-WARNING CONFIGS template2;
 TRAFNAT-WARNING TRAFFIC template3;
 TRAFSESSION-WARNING TRAFFIC template4;
 AUDIT-* AUDIT template5;
