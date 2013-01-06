@@ -73,15 +73,30 @@ struct lc_module{
 	struct lc_module *next;
 } *moduleHead,*moduleTail;
 /*the principle of parser and template of sql*/
-struct lc_subMouduleTemp{
-	char name[30];
-	char sql[MSGLEN];
+struct parser_list{
+	char letter;
+	char field[50];
+	struct parser_list *next;
 };
+struct value_list{
+	char field[50];
+	char fvalue[15];
+	struct value_list *next;
+};
+struct lc_subModuleTemp{
+	char name[30];
+	char table[50];
+	struct value_list *vHead;
+	struct value_list *vTail;
+	struct parser_list *pHead;
+	struct parser_list *pTail;
+	struct lc_subModuleTemp *next;
+} *smodulePlHead,*smodulePlTail;
 /*log sub module struct*/
 struct lc_subModule{
 	char subName[30];
 	struct lc_module *pModule;
-	struct lc_subMouduleTemp *template;
+	struct lc_subModuleTemp *template;
 	struct lc_subModule *next;
 } *smoduleHead,*smoduleTail;
 
@@ -96,7 +111,7 @@ void printline(char *msg); //insert log into cache
 
 void lc_transfer();
 int assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100],struct lc_subModule **asp);
-void sql_insert(char (*msg)[MSGLEN+100]);
+void sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
@@ -286,10 +301,13 @@ void cfline(line)
 	char *q;//
 	char *r,*needle=NULL;
 	char mName[30];
+	char pvt[30]; //template paser value
 	char dbSize[15];
 	int module_mark = 0;
 	struct lc_module *moduleTemp;
 	struct lc_subModule *smoduleTemp;
+	struct lc_subModuleTemp *smodulePl;
+	struct parser_list *parserTemp;
 	char tName[50];//template name
 	char kName[80];//the mark of a log
 	char hName[30];//name of log module | db name 
@@ -308,6 +326,24 @@ void cfline(line)
 			confStatus = 2;
 		}else if(strcmp(mName,"template")==0){
 			confStatus = 3;
+			for (; isspace(*p); ++p);
+			needle = p;
+			for(;!isspace(*p)&&(*p)!='\{';++p);
+			if(needle==p){
+				printf ("error config file in %s:missing template name\n",line);
+				exit(1);
+			}
+			smodulePl = (struct lc_subModuleTemp *)malloc(sizeof(struct lc_subModuleTemp));
+			strncpy(smodulePl->name,needle,p-needle);
+			smodulePl->name[p-needle] = '\0';
+			ldprintf(DEBUG_CONF,"%s\n",smodulePl->name);
+			if(smodulePlHead==NULL){
+				smodulePlHead = smodulePl;
+				smodulePlTail = smodulePl;
+			}else{
+				smodulePlTail->next = smodulePl;
+				smodulePlTail = smodulePl;
+			}
 		}else if(strcmp(mName,"submodule")==0){
 			confStatus = 4;
 		}else if(strcmp(mName,"backup")==0){
@@ -349,47 +385,185 @@ void cfline(line)
 				break;
 			case 2:
 				p = strchr(line,';');
-				if(p!=NULL){
-					moduleTemp = (struct lc_module *)malloc(sizeof(struct lc_module));
-					for (r = line; !isspace(*r)&&r<p ; ++r);
-					
-					strncpy(moduleTemp->name,line,r-line);
-					moduleTemp->name[r-line] = '\0';
-					
-					for (; isspace(*r)&&r<p ; ++r);
-					
-					for (needle = r; !isspace(*r)&&r<p ; ++r);
-					
-					strncpy(dbSize,needle,r-needle);
-					dbSize[r-needle] = '\0';
-
-					for (; isspace(*r)&&r<p ; ++r);
-					
-					for (needle = r; !isspace(*r)&&r<p ; ++r);
-
-					strncpy(moduleTemp->db_location,needle,r-needle);
-					moduleTemp->db_location[r-needle] = '\0';
-					if(!strlen(moduleTemp->name)||!strlen(dbSize)||\
-					   !strlen(moduleTemp->db_location)){
-							printf ("error config file with %s\n:missing some part",line);
-							exit(1);
-					}
-					moduleTemp->db_size = atoll(dbSize);
-					/*Q1 here we need to check Legitimacy of dbSize*/
-					if(moduleHead==NULL){
-						moduleHead = moduleTemp;
-						moduleTail = moduleTemp;
-					}else{
-						moduleTail->next = moduleTemp;
-						moduleTail = moduleTemp;
-					}
-				}else{
+				if(p==NULL){
 					printf ("error config file with %s\n:missing ; for end",line);
 					exit(1);
 				}
+				moduleTemp = (struct lc_module *)malloc(sizeof(struct lc_module));
+				for (r = line; !isspace(*r)&&r<p ; ++r);
+				
+				strncpy(moduleTemp->name,line,r-line);
+				moduleTemp->name[r-line] = '\0';
+				
+				for (; isspace(*r)&&r<p ; ++r);
+				
+				for (needle = r; !isspace(*r)&&r<p ; ++r);
+				
+				strncpy(dbSize,needle,r-needle);
+				dbSize[r-needle] = '\0';
+
+				for (; isspace(*r)&&r<p ; ++r);
+				
+				for (needle = r; !isspace(*r)&&r<p ; ++r);
+
+				strncpy(moduleTemp->db_location,needle,r-needle);
+				moduleTemp->db_location[r-needle] = '\0';
+				if(!strlen(moduleTemp->name)||!strlen(dbSize)||\
+				   !strlen(moduleTemp->db_location)){
+						printf ("error config file with %s:missing some part\n",line);
+						exit(1);
+				}
+				moduleTemp->db_size = atoll(dbSize);
+				/*Q1 here we need to check Legitimacy of dbSize*/
+				if(moduleHead==NULL){
+					moduleHead = moduleTemp;
+					moduleTail = moduleTemp;
+				}else{
+					moduleTail->next = moduleTemp;
+					moduleTail = moduleTemp;
+				}
 				break;
 			case 3:
-				
+				p = strchr(line,'\0');
+				for (--p; isspace(*r)&&p>line ; --p);
+				if(*p!=';'){
+					printf ("error config file with %s:missing ; for end\n",line);
+					exit(1);
+				}
+				for (r = line; *r!='\('&&!isspace(*r)&&r<p ; ++r);
+				if(r==line){
+					printf ("error config file with %s:missing function name\n",line);
+					exit(1);
+				}
+				strncpy(pvt,line,r-line);
+				pvt[r-line] = '\0';
+				if(strcmp(pvt,"parser")==0){
+					for (; isspace(*r)&&r<p ; ++r);
+					if(*r!='\('){
+						printf ("error config file with %s:missing \(\n",line);
+						exit(1);
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!='\''){
+						printf ("error config file with %s:missing \'\n",line);
+						exit(1);
+					}
+					/*initialize a parser*/
+					parserTemp = (struct parser_list *)malloc(sizeof(struct parser_list));
+					parserTemp->letter = *++r;
+					if(*++r!='\''){
+						printf ("error config file with %s:missing \'\n",line);
+						exit(1);
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!=','){
+						if(*r!=')'){
+							printf ("error config file with %s:missing ,\n",line);
+							exit(1);
+						}else{
+							parserTemp->field[0] = '\0';
+						}
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+				    if(*r!='`'){
+						printf ("error config file with %s:missing `\n",line);
+						exit(1);
+					}
+				    needle = ++r;
+				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
+					if(*r!='`'){
+						printf ("error config file with %s:missing `\n",line);
+						exit(1);
+					}
+				    strncpy(parserTemp->field,needle,r-needle);
+				    parserTemp->field[r-needle] = '\0';
+				    for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!=')'){
+						printf ("error config file with %s:missing )\n",line);
+						exit(1);
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!=';'){
+						printf ("error config file with %s:missing ;\n",line);
+						exit(1);
+					}
+					if(r!=p){
+						printf ("error config file with %s:extra end of this line\n",line);
+						exit(1);
+					}
+					if(!smodulePlTail->pHead){
+						smodulePlTail->pHead = parserTemp;
+						smodulePlTail->pTail = parserTemp;
+					}else{
+						smodulePlTail->pTail->next = parserTemp;
+						smodulePlTail->pTail = parserTemp;
+					}
+				}
+				if(strcmp(pvt,"value")==0){
+					for (; isspace(*r)&&r<p ; ++r);
+					if(*r!='\('){
+						printf ("error config file with %s:missing \(\n",line);
+						exit(1);
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!='\''){
+						printf ("error config file with %s:missing \'\n",line);
+						exit(1);
+					}
+					/*initialize a parser*/
+					valueTemp = (struct parser_list *)malloc(sizeof(struct value_list));
+					valueTemp->letter = *++r;
+					if(*++r!='\''){
+						printf ("error config file with %s:missing \'\n",line);
+						exit(1);
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!=','){
+						if(*r!=')'){
+							printf ("error config file with %s:missing ,\n",line);
+							exit(1);
+						}else{
+							parserTemp->field[0] = '\0';
+						}
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+				    if(*r!='`'){
+						printf ("error config file with %s:missing `\n",line);
+						exit(1);
+					}
+				    needle = ++r;
+				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
+					if(*r!='`'){
+						printf ("error config file with %s:missing `\n",line);
+						exit(1);
+					}
+				    strncpy(parserTemp->field,needle,r-needle);
+				    parserTemp->field[r-needle] = '\0';
+				    for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!=')'){
+						printf ("error config file with %s:missing )\n",line);
+						exit(1);
+					}
+					for (++r; isspace(*r)&&r<p ; ++r);
+					if(*r!=';'){
+						printf ("error config file with %s:missing ;\n",line);
+						exit(1);
+					}
+					if(r!=p){
+						printf ("error config file with %s:extra end of this line\n",line);
+						exit(1);
+					}
+					if(!smodulePlTail->vHead){
+						smodulePlTail->vHead = valueTemp;
+						smodulePlTail->vTail = valueTemp;
+					}else{
+						smodulePlTail->vTail->next = valueTemp;
+						smodulePlTail->vTail = valueTemp;
+					}
+				}
+				if(strcmp(pvt,"table")==0){
+					
+				}
 				break;
 			case 4:
 				p = strchr(line,';');
@@ -433,6 +607,17 @@ void cfline(line)
 						exit(1);
 					}
 					/*get the template of submodule*/
+					smodulePl = smodulePlHead;
+					while(smodulePl!=NULL){
+						if(strcmp(tName,smodulePl->name)==0){
+							smoduleTemp->template = smodulePl;
+						}
+						smodulePl = smodulePl->next;
+					}
+					if(smoduleTemp->pModule==NULL){
+						printf ("error config file with %s:log module %s does not exist!\n",line,hName);
+						exit(1);
+					}
 					/*insert into the link*/
 					if(smoduleHead==NULL){
 						smoduleHead = smoduleTemp;
@@ -747,7 +932,7 @@ int assemLog(msg,sqlMsg,asp)
 
 /*
 backup thread`s main function
-usage:which is uesd to backup those main database
+usage:which is used to backup those main database
 */
 void lc_backup(){
 

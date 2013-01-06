@@ -8,16 +8,19 @@ TRAFFIC 1024000000 /var/log/security.db;
 AUDIT 10240000000 /var/log/security.db;
 sfsfs 102a sfsf;
 }
-template template2{
-	parser('@',$MSG,$MSG1,$MSG2);
-	parser(' ',$MSG2,$MSG3,$MSG4);
-	sql("insert into config(`cid`,`datetime`,`host`,`priority`,`facility`,\
-	`user`,`module`,`content`) values('',$datetime,$host,$PRI,$FAC,$MSG1,$MSG3,$MSG4);");
-}
+
 template template1{
-	parser('@',"");
-	parser(' ',"user");
 	
+}
+template template2{
+	parser('@',`user`);
+	parser(' ',`module`);
+	value(`content`,$LEFT);
+	value(`datetime`,$DATE);
+	value(`host`,$HOST);
+	value(`priority`,$PRI);
+	value(`facility`,$FAC);
+	table(`config`);
 }
 template template3{
 }
