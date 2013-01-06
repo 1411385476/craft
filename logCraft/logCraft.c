@@ -59,15 +59,16 @@ char * parts;//the left part of message
 /*struct list*/
 struct bk_time{
 	short int day;
-	short int time;
+	int time;
+	struct bk_time *next;
 };
 
 struct bkOption{
 	short int bk_style;//0 nature 1 auto only 2 auto+mand
 	short int bk_action;
-	short int bk_dir[256];
-	struct bktime *bkTimeHead;
-	struct bktime *bkTimeTail;
+	char bk_dir[256];
+	struct bk_time *bkTimeHead;
+	struct bk_time *bkTimeTail;
 } bkInstant;
 
 struct lc_statistic{
@@ -325,6 +326,7 @@ void cfline(line)
 	struct parser_list *parserTemp;
 	struct value_list *valueTemp;
 	struct bk_time *bkTime;
+	char stamptime[12];
 	char tName[50];//template name
 	char kName[80];//the mark of a log
 	char hName[30];//name of log module | db name 
@@ -444,38 +446,38 @@ void cfline(line)
 				p = strchr(line,'\0');
 				for (--p; isspace(*r)&&p>line ; --p);
 				if(*p!=';'){
-					printf ("error config file with %s:missing ; for end\n",line);
+					printf ("error config file with %s:missing ; for end \n",line);
 					exit(1);
 				}
 				for (r = line; *r!='\('&&!isspace(*r)&&r<p ; ++r);
 				if(r==line){
-					printf ("error config file with %s:missing function name\n",line);
+					printf ("error config file with %s:missing function name \n",line);
 					exit(1);
 				}
 				strncpy(pvt,line,r-line);
 				pvt[r-line] = '\0';
 				if(strcmp(pvt,"parser")==0){
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \(\n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!='\''){
-						printf ("error config file with %s:missing \'\n",line);
+						printf ("error config file with %s:missing \' \n",line);
 						exit(1);
 					}
 					/*initialize a parser*/
 					parserTemp = (struct parser_list *)malloc(sizeof(struct parser_list));
 					parserTemp->letter = *++r;
 					if(*++r!='\''){
-						printf ("error config file with %s:missing \'\n",line);
+						printf ("error config file with %s:missing \' \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=','){
 						if(*r!=')'){
-							printf ("error config file with %s:missing ,\n",line);
+							printf ("error config file with %s:missing , \n",line);
 							exit(1);
 						}else{
 							parserTemp->field[0] = '\0';
@@ -483,25 +485,25 @@ void cfline(line)
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 				    if(*r!='`'){
-						printf ("error config file with %s:missing `\n",line);
+						printf ("error config file with %s:missing ` \n",line);
 						exit(1);
 					}
 				    needle = ++r;
 				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
 					if(*r!='`'){
-						printf ("error config file with %s:missing `\n",line);
+						printf ("error config file with %s:missing ` \n",line);
 						exit(1);
 					}
 				    strncpy(parserTemp->field,needle,r-needle);
 				    parserTemp->field[r-needle] = '\0';
 				    for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
-						printf ("error config file with %s:missing )\n",line);
+						printf ("error config file with %s:missing ) \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=';'){
-						printf ("error config file with %s:missing ;\n",line);
+						printf ("error config file with %s:missing ; \n",line);
 						exit(1);
 					}
 					if(r!=p){
@@ -520,20 +522,20 @@ void cfline(line)
 				if(strcmp(pvt,"value")==0){
 					valueTemp = (struct value_list *)malloc(sizeof(struct value_list));
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \(\n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					/*get these fields*/
 					for (++r; isspace(*r)&&r<p ; ++r);
 				    if(*r!='`'){
-						printf ("error config file with %s:missing `\n",line);
+						printf ("error config file with %s:missing ` \n",line);
 						exit(1);
 					}
 				    needle = ++r;
 				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
 					if(*r!='`'){
-						printf ("error config file with %s:missing `\n",line);
+						printf ("error config file with %s:missing ` \n",line);
 						exit(1);
 					}
 					if(needle==r){
@@ -547,7 +549,7 @@ void cfline(line)
 					*/
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=','){
-						printf ("error config file with %s:missing ,\n",line);
+						printf ("error config file with %s:missing , \n",line);
 						exit(1);
 					}
 					/*
@@ -555,7 +557,7 @@ void cfline(line)
 					*/
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!='$'){
-						printf ("error config file with %s:wrong parameter\n",line);
+						printf ("error config file with %s:wrong parameter \n",line);
 						exit(1);
 					}
 					/*initialize the field value*/
@@ -566,12 +568,12 @@ void cfline(line)
 					/*detect the end of function*/
 				    for (; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
-						printf ("error config file with %s:missing )\n",line);
+						printf ("error config file with %s:missing ) \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=';'){
-						printf ("error config file with %s:missing ;\n",line);
+						printf ("error config file with %s:missing ; \n",line);
 						exit(1);
 					}
 					if(r!=p){
@@ -589,20 +591,20 @@ void cfline(line)
 				}
 				if(strcmp(pvt,"table")==0){
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \(\n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					/*get table name*/
 					for (++r; isspace(*r)&&r<p ; ++r);
 				    if(*r!='`'){
-						printf ("error config file with %s:missing `\n",line);
+						printf ("error config file with %s:missing ` \n",line);
 						exit(1);
 					}
 				    needle = ++r;
 				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
 					if(*r!='`'){
-						printf ("error config file with %s:missing `\n",line);
+						printf ("error config file with %s:missing ` \n",line);
 						exit(1);
 					}
 					if(needle==r){
@@ -615,12 +617,12 @@ void cfline(line)
 					/*detect the end of function*/
 				    for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
-						printf ("error config file with %s:missing )\n",line);
+						printf ("error config file with %s:missing ) \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=';'){
-						printf ("error config file with %s:missing ;\n",line);
+						printf ("error config file with %s:missing ; \n",line);
 						exit(1);
 					}
 					if(r!=p){
@@ -692,7 +694,7 @@ void cfline(line)
 						smoduleTail = smoduleTemp;
 					}
 				}else{
-					printf ("error config file with %s\n:missing ; for end",line);
+					printf ("error config file with %s:missing ; for end\n",line);
 					exit(1);
 				}
 				break;
@@ -700,20 +702,20 @@ void cfline(line)
 				p = strchr(line,'\0');
 				for (--p; isspace(*r)&&p>line ; --p);
 				if(*p!=';'){
-					printf ("error config file with %s:missing ; for end\n",line);
+					printf ("error config file with %s:missing ; for end \n",line);
 					exit(1);
 				}
 				for (r = line; *r!='\('&&!isspace(*r)&&r<p ; ++r);
 				if(r==line){
-					printf ("error config file with %s:missing function name\n",line);
+					printf ("error config file with %s:missing function name \n",line);
 					exit(1);
 				}
 				strncpy(bkName,line,r-line);
 				bkName[r-line] = '\0';
 				if(strcmp(bkName,"set")==0){
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \(\n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
@@ -732,13 +734,13 @@ void cfline(line)
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 				    if(*r!='\"'){
-						printf ("error config file with %s:missing \"\n",line);
+						printf ("error config file with %s:missing \" \n",line);
 						exit(1);
 					}
 				    needle = ++r;
-				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
+				    for (; *r!='\"'&&!isspace(*r)&&r<p ; ++r);
 					if(*r!='\"'){
-						printf ("error config file with %s:missing \"\n",line);
+						printf ("error config file with %s:missing \" \n",line);
 						exit(1);
 					}
 				    strncpy(bkInstant.bk_dir,needle,r-needle);
@@ -746,12 +748,12 @@ void cfline(line)
 					/*check the end of set*/
 				    for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
-						printf ("error config file with %s:missing )\n",line);
+						printf ("error config file with %s:missing ) \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=';'){
-						printf ("error config file with %s:missing ;\n",line);
+						printf ("error config file with %s:missing ; \n",line);
 						exit(1);
 					}
 					if(r!=p){
@@ -763,8 +765,8 @@ void cfline(line)
 				if(strcmp(bkName,"time")==0){
 					bkTime = (struct bk_time *)malloc(sizeof(struct bk_time));
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \(\n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing (\n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
@@ -787,14 +789,15 @@ void cfline(line)
 						exit(1);
 					}
 				    needle = ++r;
-				    for (; *r!='`'&&!isspace(*r)&&r<p ; ++r);
+				    for (; *r!='\"'&&!isspace(*r)&&r<p ; ++r);
 					if(*r!='\"'){
 						printf ("error config file with %s:missing \"\n",line);
 						exit(1);
 					}
-				    strncpy(bkInstant.bk_dir,needle,r-needle);
-				    bkInstant.bk_dir[r-needle] = '\0';
-					/*check the end of set*/
+				    strncpy(stamptime,needle,r-needle);
+				    stamptime[r-needle] = '\0';
+					bkTime->time = 1234567;
+					/*check the end of time*/
 				    for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
 						printf ("error config file with %s:missing )\n",line);
@@ -809,7 +812,14 @@ void cfline(line)
 						printf ("error config file with %s:extra end of this line\n",line);
 						exit(1);
 					}
-					ldprintf(DEBUG_CONF,"%d : %d\n",bkTime.day,bkTime.time);
+					ldprintf(DEBUG_CONF,"%d : %d\n",bkTime->day,bkTime->time);
+					if(!bkInstant.bkTimeHead){
+						bkInstant.bkTimeHead = bkTime;
+						bkInstant.bkTimeTail = bkTime;
+					}else{
+						bkInstant.bkTimeTail->next = bkTime;
+						bkInstant.bkTimeTail = bkTime;
+					}
 				}
 				break;
 			default:
