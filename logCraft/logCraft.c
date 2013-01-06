@@ -53,6 +53,7 @@ char (* log_cache)[MSGLEN];
 char (* log_cache_out)[MSGLEN];
 char log_cache_start[CACHESIZE][MSGLEN];
 void cfline(char *line);
+int unix_time(char *time);
 sem_t *sem;
 int sock;
 char * parts;//the left part of message
@@ -796,7 +797,7 @@ void cfline(line)
 					}
 				    strncpy(stamptime,needle,r-needle);
 				    stamptime[r-needle] = '\0';
-					bkTime->time = 1234567;
+					bkTime->time = unix_time (stamptime);
 					/*check the end of time*/
 				    for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
@@ -1162,7 +1163,26 @@ void logerror(type)
 	return;
 }
 /*print the debug infomation*/
-
+int unix_time(time)
+	char *time;
+{
+	char *p,*q;
+	int s;
+	char temp[5];
+	q = time;
+	p = strchr(q,':');
+	strncpy(temp,q,p-q);
+	temp[p-q] = '\0';
+	s = atoi(temp)*3600;
+	q = ++p;
+	p = strchr(q,':');
+	strncpy(temp,q,p-q);
+	temp[p-q] = '\0';
+	s += atoi(temp)*60;
+	strcpy(temp,++p);
+	s += atoi(temp);
+	return s;
+}
 static void ldprintf(int mark,char *fmt,...){
 	va_list ap;
 

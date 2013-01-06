@@ -61,7 +61,7 @@ AUDIT-* AUDIT template5;
 }
 #backup automaticly config for craft
 backup{
-	set 0 , "/home/scrooph/" );
+	set( 0 , "/home/scrooph/" );
 	time( 0 , "12:33:12" );
 	time( 1 , "12:33:12" );
 	time( 2 , "12:33:12" );

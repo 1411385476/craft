@@ -53,6 +53,7 @@ char (* log_cache)[MSGLEN];
 char (* log_cache_out)[MSGLEN];
 char log_cache_start[CACHESIZE][MSGLEN];
 void cfline(char *line);
+int unix_time(char *time);
 sem_t *sem;
 int sock;
 char * parts;//the left part of message
@@ -458,8 +459,8 @@ void cfline(line)
 				pvt[r-line] = '\0';
 				if(strcmp(pvt,"parser")==0){
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \( \n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					for (++r; isspace(*r)&&r<p ; ++r);
@@ -522,8 +523,8 @@ void cfline(line)
 				if(strcmp(pvt,"value")==0){
 					valueTemp = (struct value_list *)malloc(sizeof(struct value_list));
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \( \n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					/*get these fields*/
@@ -591,8 +592,8 @@ void cfline(line)
 				}
 				if(strcmp(pvt,"table")==0){
 					for (; isspace(*r)&&r<p ; ++r);
-					if(*r!='\('){
-						printf ("error config file with %s:missing \( \n",line);
+					if(*r!='('){
+						printf ("error config file with %s:missing ( \n",line);
 						exit(1);
 					}
 					/*get table name*/
@@ -1162,7 +1163,26 @@ void logerror(type)
 	return;
 }
 /*print the debug infomation*/
-
+int unix_time(time)
+	char *time;
+{
+	char *p,*q;
+	int s;
+	char temp[5];
+	q = time;
+	p = strchr(q,':');
+	strncpy(temp,q,p-q);
+	temp[p-q] = '\0';
+	s = atoi(temp)*3600;
+	q = ++p;
+	p = strchr(q,':');
+	strncpy(temp,q,p-q);
+	temp[p-q] = '\0';
+	s += atoi(temp)*60;
+	strcpy(temp,++p);
+	s += atoi(temp);
+	return s;
+}
 static void ldprintf(int mark,char *fmt,...){
 	va_list ap;
 
