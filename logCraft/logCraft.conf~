@@ -23,10 +23,34 @@ template template2{
 	table(`config`);
 }
 template template3{
+	parser('@',`user`);
+	parser(' ',`module`);
+	value(`content`,$LEFT);
+	value(`datetime`,$DATE);
+	value(`host`,$HOST);
+	value(`priority`,$PRI);
+	value(`facility`,$FAC);
+	table(`config`);
 }
 template template4{
+	parser('@',`user`);
+	parser(' ',`module`);
+	value(`content`,$LEFT);
+	value(`datetime`,$DATE);
+	value(`host`,$HOST);
+	value(`priority`,$PRI);
+	value(`facility`,$FAC);
+	table(`config`);
 }
 template template5{
+	parser('@',`user`);
+	parser(' ',`module`);
+	value(`content`,$LEFT);
+	value(`datetime`,$DATE);
+	value(`host`,$HOST);
+	value(`priority`,$PRI);
+	value(`facility`,$FAC);
+	table(`config`);
 }
 submodule{
 SECURITY-ATTACK SECURITY template1;
@@ -37,7 +61,8 @@ AUDIT-* AUDIT template5;
 }
 #backup automaticly config for craft
 backup{
-Y;
-DIR;
-0 XX:XX:XX;
+	set( Y , "/home/scrooph" );
+	time( 0 , "12:33:12" );
+	time( 1 , "12:33:12" );
+	time( 2 , "12:33:12" );
 }
