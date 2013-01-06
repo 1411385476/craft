@@ -15,7 +15,9 @@ template template2{
 	`user`,`module`,`content`) values('',$datetime,$host,$PRI,$FAC,$MSG1,$MSG3,$MSG4);");
 }
 template template1{
-
+	parser('@',"");
+	parser(' ',"user");
+	
 }
 template template3{
 }
@@ -25,7 +27,7 @@ template template5{
 }
 submodule{
 SECURITY-ATTACK SECURITY template1;
-CONFIG-WARNING CONFIGS template2;
+CONFIG-WARNING CONFIG template2;
 TRAFNAT-WARNING TRAFFIC template3;
 TRAFSESSION-WARNING TRAFFIC template4;
 AUDIT-* AUDIT template5;

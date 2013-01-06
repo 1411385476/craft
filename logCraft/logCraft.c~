@@ -95,7 +95,7 @@ void printchopped(char*,int);
 void printline(char *msg); //insert log into cache
 
 void lc_transfer();
-int assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100]);
+int assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100],struct lc_subModule **asp);
 void sql_insert(char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
@@ -192,7 +192,9 @@ void lc_init()
 	register FILE *cf;
 	register char *p;
 	struct lc_subModule *sp;
+	struct lc_module *moduleTemp;
 	int hashlen = 0;
+	int rc;
 	
 #ifdef CONT_LINE
 	char cbuf[BUFSIZ];
@@ -249,6 +251,18 @@ void lc_init()
 
 	/* close the configuration file */
 	(void) fclose(cf);
+	/*init the log module sqlite3 conn*/
+	moduleTemp = moduleHead;
+	while(moduleTemp!=NULL){
+		ldprintf(DEBUG_MAIN,"%s\n",moduleTemp->db_location);
+		rc = sqlite3_open(moduleTemp->db_location, &(moduleTemp->db));
+		if( rc )
+		{
+			fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(moduleTemp->db));
+			sqlite3_close(moduleTemp->db);
+		}
+		moduleTemp = moduleTemp->next;
+	}
 	/*init the hash for subModule*/
 	sp = smoduleHead;
 	while(sp!=NULL){
@@ -263,7 +277,6 @@ void lc_init()
 		hash_add(sp->subName,sp,htab);
 		sp = sp->next;
 	}
-	
 }
 
 void cfline(line)
@@ -620,6 +633,7 @@ this is the function for process syslog
 void lc_transfer(){
 	char cline[MSGLEN];
 	char sline[MSGLEN+100];
+	struct lc_subModule *sp;
 	
 	while(1){
 		/*get msg from cache*/
@@ -633,9 +647,9 @@ void lc_transfer(){
 		ldprintf(DEBUG_TRAN,"%s\n",cline);
 		
 		/*check and split the message assem it into a sql sentence*/
-		if(assemLog(&cline,&sline)){
+		if(assemLog(&cline,&sline,&sp)){
 			/*insert message into db*/
-			//sql_insert(&sline);
+			sql_insert(sp,&sline);
 			lc_stat.lc_db_succ++;
 		}else{
 			lc_stat.lc_db_fail++;
@@ -649,9 +663,10 @@ void lc_transfer(){
  * on the appropriate log files.
  */
 
-int assemLog(msg,sqlMsg)
+int assemLog(msg,sqlMsg,asp)
 	char (*msg)[MSGLEN];
 	char (*sqlMsg)[MSGLEN+100];
+	struct lc_subModule **asp;
 {
 	register char *p, *q;
 	register unsigned char c;
@@ -723,11 +738,11 @@ int assemLog(msg,sqlMsg)
 	ep = hash_find(nMark,htab);
 	if(ep){
 		sp = (struct lc_subModule *)ep->data;
-		printf("%s\n",sp->subName);
-	}else{
-		lc_stat.lc_drop++;
+		*asp = sp;
+		ldprintf(DEBUG_MAIN,"%s\n",sp->subName);
+		return 1;
 	}
-	return 1;
+	return 0;
 }
 
 /*
@@ -742,26 +757,18 @@ void lc_backup(){
 
 
 /*insert sql insto db*/
-void sql_insert(msg)
+void sql_insert(sp,msg)
+	struct lc_subModule *sp;
 	char (*msg)[MSGLEN+100];
 {
-	int rc,i;
+	int i;
 	char msg_temp[MSGLEN+100];
-	sqlite3 *db;
-	rc = sqlite3_open(db_location, &db);
-	ldprintf(DEBUG_MAIN,"%s",db_location);
 	char * pErrMsg = 0;
-	if( rc )
-	{
-		fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
-		sqlite3_close(db);
-	}
-	else{ 
-		//lt_dprintf("You have opened a sqlite3 database \n");
-		sprintf(msg_temp,"insert into nat(`content`) values('%s');",*msg);
-		sqlite3_exec( db,msg_temp, 0, 0, &pErrMsg);
-	}
-	sqlite3_close(db); //关闭
+
+	sprintf(msg_temp,"insert into nat(`content`) values('%s');",*msg);
+	sqlite3_exec( sp->pModule->db,msg_temp, 0, 0, &pErrMsg);
+	/*check the error message*/
+	return;
 }
 /*log error from logCraft*/
 void logerror(type)
