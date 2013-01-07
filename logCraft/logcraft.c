@@ -1159,12 +1159,12 @@ int assemLog(msg,sqlMsg,asp)
 		ldprintf(DEBUG_TRAN,"%s\n",sp->subName);
 		/*split the log then assemble the sql*/
 		for(;isspace(*q);q++) msglen--;
-		p = q;
 		spvalue[0] = '\0';
 		spfield[0] = '\0';
 		parserTemp = sp->template->pHead;
 		while(!parserTemp){
-			q = strchr(parserTemp->letter);
+			p = q;
+			q = strchr(q,parserTemp->letter);
 			if(parserTemp->field[0] != '\0'){
 				strncpy(fvalue,p,q-p);
 				fvalue[q-p] = '\0';
