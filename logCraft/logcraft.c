@@ -1259,7 +1259,15 @@ int assemLog(msg,sqlMsg,asp)
 			}
 			valueTemp = valueTemp->next;
 		}
-		sprintf(sqlMsg,"replace (%s) (%s);",,);
+		if(spfield[0]!='\0'){
+			strcat(svfield,", ");
+		}
+		strcat(svfield,spfield);
+		if(spvalue[0]!='\0'){
+			strcat(svvalue,", ");
+		}
+		strcat(svvalue,spvalue);
+		sprintf(sqlMsg,"replace %s(%s) values(%s);",sp->template->table,svfield,svvalue);
 		return 1;
 	}
 	return 0;
