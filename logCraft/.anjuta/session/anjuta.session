@@ -3,6 +3,12 @@
 Maximized=1
 Geometry=1366x673+0+32
 
+[Project Manager]
+Expand=logCraft%%%logCraft//logCraft
+
+[File Loader]
+Files=file:///home/scrooph/craft/logCraft/logcraft.c#1116%%%file:///home/scrooph/craft/logCraft/logcraft.conf#1
+
 [Document Manager]
 bookmarks=<?xml version="1.0" encoding="UTF-8"?>\n<bookmarks/>\n
 
