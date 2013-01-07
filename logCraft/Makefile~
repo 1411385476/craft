@@ -4,9 +4,9 @@ BINDIR = $(prefix)/usr/sbin
 MANDIR = $(prefix)/usr/share/man
 
 all: logcraft
-logcraft: logcraft.o
+logCraft: logcraft.o
 	${CC} -o logcraft logcraft.o ${LIBS}  -lsqlite3 -pthread -levent
-logcraft.o: logcraft.c
+logCraft.o: logcraft.c
 	${CC} -c logcraft.c
 clean:
 	rm -f *.o
