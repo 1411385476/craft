@@ -1118,13 +1118,14 @@ int assemLog(msg,sqlMsg,asp)
 		return 0;
 	}
 	/*get the rid*/
-	(void *)itoa(sp->rid,ridChar,10);
+	sprintf(ridChar,"%d",sp->rid);
 	(void) time(&now); //timestamp
-	(void *)itoa(now,dateChar,10);
-	
+	sprintf(dateChar,"%d",now);
 	/* extract facility and priority level */
 	fac = LOG_FAC(pri);
 	prilev = LOG_PRI(pri);
+	sprintf(priChar,"%d",prilev);
+	sprintf(facChar,"%d",fac);
 	/*hostname*/
 	for(;isspace(*q);q++) msglen--;
 	p = q;
@@ -1205,7 +1206,7 @@ int assemLog(msg,sqlMsg,asp)
 					strcat(svfield,"`");
 					break;
 				case DATE:
-					strcat(svvalue,ridChar);
+					strcat(svvalue,dateChar);
 					if(svfield[0]=='\0'){
 						strcat(svfield,"`");
 					}else{
