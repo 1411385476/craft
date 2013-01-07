@@ -18,6 +18,23 @@ struct log_tab{
 	char name[20];
 	void * p;
 } ;
+//日志模块属性
+struct logModule{
+	char logdir[30];//cache目录
+	char moduleName[10];//模块名称
+	int rollMark; //回滚选项
+	int rollStatus; //当前回滚状态
+	int logsize;//日志大小
+	int format;//日志格式类型
+};
+//日志子模块属性
+struct logSubModule{
+	char subName[20];
+	struct logModule *p;
+	int maxNum;//当前表存储最大条目数
+	int needle;//数据表当前已回滚条目数
+};
+
 char *log_tab_key[] = {"TRAFNAT","TRAFSESSION","SECURITY","AUDIT","CONFIG"};
 struct hsearch_data *htab;
 //struct log_tab * log_tab_all[5];

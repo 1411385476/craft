@@ -1040,8 +1040,15 @@ int assemLog(msg,sqlMsg,asp)
 	int pri;
 	int fac, prilev,msglen;
 	char sqlTemp[MSGLEN+100];
+	char spfield[MSGLEN+100];
+	char spvalue[MSGLEN+100];
+	char svfield[MSGLEN+100];
+	char svvalue[MSGLEN+100];
+	char fvalue[MSGLEN+100];
 	char hostname[50];
 	char nMark[20];
+	struct parser_list *parserTemp;
+	struct value_list *valueTemp;
 	time_t	now;
 	ENTRY *ep;
 	struct lc_subModule *sp;
@@ -1113,7 +1120,20 @@ int assemLog(msg,sqlMsg,asp)
 		ldprintf(DEBUG_TRAN,"%s\n",sp->subName);
 		/*split the log then assemble the sql*/
 		for(;isspace(*q);q++) msglen--;
-		left = q;
+		p = q;
+		spvalue[0] = '\0';
+		parserTemp = sp->template->pHead;
+		while(!parserTemp){
+			q = strchr(parserTemp->letter);
+			if(parserTemp->field[0] != '\0'){
+				strncpy(fvalue,p,q-p);
+				fvalue[q-p] = '\0';
+				strcat(spvalue,fvalue);
+				strcat(spfield,parserTemp->field);
+			}
+			q++;
+			parserTemp = parserTemp->next;
+		}
 		return 1;
 	}
 	return 0;
