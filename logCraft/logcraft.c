@@ -33,11 +33,12 @@ logcraft: a software for process Log from system
 #define DEBUG_TRAN	2
 #define DEBUG_CONF	3
 /*define log constant parameter*/
-#define DATE	0		/* unused entry */
-#define HOST		1		/* regular file */
-#define PRI		2		/* terminal */
-#define FAC	3		/* console terminal */
-#define LEFT		4		/* remote machine */
+#define RID		0	/* table log id*/
+#define DATE	1	/* unused entry */
+#define HOST	2	/* regular file */
+#define PRI		3	/* terminal */
+#define FAC		4	/* console terminal */
+#define LEFT	5	/* remote machine */
 
 /**/
 static int debugging_on = 0;
@@ -118,6 +119,8 @@ struct lc_subModule{
 	char subName[30];
 	struct lc_module *pModule;
 	struct lc_subModuleTemp *template;
+	int mid;
+	int rid;
 	struct lc_subModule *next;
 } *smoduleHead,*smoduleTail;
 
@@ -566,7 +569,9 @@ void cfline(line)
 					for (needle = ++r; *r!=')'&&!isspace(*r)&&r<p ; ++r);
 					strncpy(vfvalue,needle,r-needle);
 					vfvalue[r-needle] = '\0';
-					if(strcmp(vfvalue,"PRI")==0){
+					if(strcmp(vfvalue,"RID")==0){
+						valueTemp->fvalue = RID; //Q4 we must check RID existence
+					}else if(strcmp(vfvalue,"PRI")==0){
 						valueTemp->fvalue = PRI;
 					}else if(strcmp(vfvalue,"FAC")==0){
 						valueTemp->fvalue = FAC;
@@ -1070,6 +1075,7 @@ int assemLog(msg,sqlMsg,asp)
 	char fvalue[MSGLEN+100];
 	char hostname[50];
 	char nMark[20];
+	char ridChar[15],priChar[4],facChar[4],dateChar[15];
 	struct parser_list *parserTemp;
 	struct value_list *valueTemp;
 	time_t	now;
@@ -1107,8 +1113,10 @@ int assemLog(msg,sqlMsg,asp)
 	}else{
 		return 0;
 	}
-
+	
+	(void *)itoa(sp->rid,ridChar,10);
 	(void) time(&now); //timestamp
+	(void *)itoa(now,dateChar,10);
 	
 	/* extract facility and priority level */
 	fac = LOG_FAC(pri);
@@ -1171,24 +1179,84 @@ int assemLog(msg,sqlMsg,asp)
 			parserTemp = parserTemp->next;
 		}
 		left = q;
+		svvalue[0] = '\0';
+		svfield[0] = '\0';
 		valueTemp = sp->template->vHead;
 		while(!valueTemp){
+			if(svvalue[0]!='\0'){
+				strcat(svvalue,", ");
+			}
 			switch(valueTemp->fvalue){
+				case RID:
+					strcat(svvalue,ridChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
+					break;
 				case DATE:
+					strcat(svvalue,ridChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
 					break;
 				case HOST:
+					strcat(svvalue,hostname);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
 					break;
 				case PRI:
+					strcat(svvalue,priChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
 					break;
 				case FAC:
+					strcat(svvalue,facChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
 					break;
 				case LEFT:
+					if(spvalue[0]!='\0'){
+						strcat(spvalue,sqlite3_mprintf(", %Q",left));
+					}else{
+						strcat(spvalue,sqlite3_mprintf("%Q",left));
+					}
+					if(spfield[0]=='\0'){
+						strcat(spfield,"`");
+					}else{
+						strcat(spfield,",`");
+					}
+					strcat(spfield,valueTemp->field);
+					strcat(spfield,"`");
 					break;
 				default:
 					
 			}
 			valueTemp = valueTemp->next;
 		}
+		sprintf(sqlMsg,"replace (%s) (%s);",,);
 		return 1;
 	}
 	return 0;
