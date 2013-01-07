@@ -1045,6 +1045,10 @@ void lc_transfer(){
 		if(assemLog(&cline,&sline,&sp)){
 			/*insert message into db*/
 			sql_insert(sp,&sline);
+			/*Q5*/
+			sp->mid = 10000;
+			/*Q6*/
+			sp->rid = (sp->rid+1)%sp->mid;
 			lc_stat.lc_db_succ++;
 		}else{
 			lc_stat.lc_db_fail++;
@@ -1113,7 +1117,7 @@ int assemLog(msg,sqlMsg,asp)
 	}else{
 		return 0;
 	}
-	
+	/*get the rid*/
 	(void *)itoa(sp->rid,ridChar,10);
 	(void) time(&now); //timestamp
 	(void *)itoa(now,dateChar,10);
@@ -1268,6 +1272,7 @@ int assemLog(msg,sqlMsg,asp)
 		}
 		strcat(svvalue,spvalue);
 		sprintf(sqlMsg,"replace %s(%s) values(%s);",sp->template->table,svfield,svvalue);
+		ldprintf(DEBUG_TRAN,"%s\n",sqlMsg);
 		return 1;
 	}
 	return 0;
@@ -1293,9 +1298,10 @@ void sql_insert(sp,msg)
 	char msg_temp[MSGLEN+100];
 	char * pErrMsg = 0;
 
-	sprintf(msg_temp,"insert into nat(`content`) values('%s');",*msg);
-	sqlite3_exec( sp->pModule->db,msg_temp, 0, 0, &pErrMsg);
-	/*check the error message*/
+	//sprintf(msg_temp,"insert into nat(`content`) values(%s);",*msg);
+	//sqlite3_exec( sp->pModule->db,*msg, 0, 0, &pErrMsg);
+	ldprintf(DEBUG_TRAN,"%s\n",msg);
+	/*Q7 check the error message*/
 	return;
 }
 /*log error from logcraft*/
