@@ -1132,7 +1132,7 @@ int assemLog(msg,sqlMsg,asp)
 	strncpy(hostname,p,q-p);
 	hostname[q-p] = '\0';
 	if(p==q){
-		hostname = "localhost";
+		strcpy(hostname,"local");
 	}
 	/*kernel mark/ submodule mark*/
 	for(;isspace(*q);q++) msglen--;
@@ -1259,6 +1259,7 @@ int assemLog(msg,sqlMsg,asp)
 					strcat(spfield,"`");
 					break;
 				default:
+					ldprintf(DEBUG_TRAN,"valueTemp has some problems in assemLog!\n");
 					
 			}
 			valueTemp = valueTemp->next;
@@ -1271,7 +1272,7 @@ int assemLog(msg,sqlMsg,asp)
 			strcat(svvalue,", ");
 		}
 		strcat(svvalue,spvalue);
-		sprintf(sqlMsg,"replace %s(%s) values(%s);",sp->template->table,svfield,svvalue);
+		sprintf(*sqlMsg,"replace %s(%s) values(%s);",sp->template->table,svfield,svvalue);
 		ldprintf(DEBUG_TRAN,"%s\n",sqlMsg);
 		return 1;
 	}
