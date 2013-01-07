@@ -1127,6 +1127,9 @@ int assemLog(msg,sqlMsg,asp)
 	for(;!isspace(*q);q++) msglen--;
 	strncpy(hostname,p,q-p);
 	hostname[q-p] = '\0';
+	if(p==q){
+		hostname = "localhost";
+	}
 	/*kernel mark/ submodule mark*/
 	for(;isspace(*q);q++) msglen--;
 	p = q;
