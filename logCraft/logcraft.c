@@ -157,7 +157,7 @@ int main(int argc,char *argv[])
 	struct event *ev;
 	/**/
 	if(argc>=2){
-		debugging_on = 2;
+		debugging_on = atoi(argv[1]);
 	}
 
 	/*initial the config*/
