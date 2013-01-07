@@ -32,10 +32,18 @@ logcraft: a software for process Log from system
 #define DEBUG_MAIN	1
 #define DEBUG_TRAN	2
 #define DEBUG_CONF	3
+/*define log constant parameter*/
+#define DATE	0		/* unused entry */
+#define HOST		1		/* regular file */
+#define PRI		2		/* terminal */
+#define FAC	3		/* console terminal */
+#define LEFT		4		/* remote machine */
 
+/**/
 static int debugging_on = 0;
 
 struct hsearch_data *htab;
+
 
 static int cache_rflag = 0;
 pthread_t transfer_tid;
@@ -93,7 +101,7 @@ struct parser_list{
 };
 struct value_list{
 	char field[50];
-	char fvalue[15];
+	int fvalue;
 	struct value_list *next;
 };
 struct lc_subModuleTemp{
@@ -177,7 +185,7 @@ int main(int argc,char *argv[])
 		oops("bind",3);
 	}
 	listen(sock,6);
-	/* 设置客户端socket为非阻塞模式。 */
+	/* set nonblock*/
     if (setnonblock(sock) < 0)
             oops("failed to set logcraft socket non-blocking",4);
 	/*start the transfer thread*/
@@ -293,7 +301,7 @@ void lc_init()
 		hashlen++;
 		sp = sp->next;
 	}
-	/*create hash table*/
+	/*create log module  hash table*/
 	hash_create(hashlen+5,htab);
 	sp = smoduleHead;
 	while(sp!=NULL){
@@ -312,6 +320,7 @@ void cfline(line)
 	char pvt[30]; //template paser value
 	char bkName[30];
 	char dbSize[15];
+	char vfvalue[15];
 	int module_mark = 0;
 	struct lc_module *moduleTemp;
 	struct lc_subModule *smoduleTemp;
@@ -550,14 +559,28 @@ void cfline(line)
 					*/
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!='$'){
-						printf ("error config file with %s:wrong parameter \n",line);
+						printf ("error config file with %s:parameter missing $ \n",line);
 						exit(1);
 					}
 					/*initialize the field value*/
 					for (needle = ++r; *r!=')'&&!isspace(*r)&&r<p ; ++r);
-					strncpy(valueTemp->fvalue,needle,r-needle);
-					valueTemp->fvalue[r-needle] = '\0';
-					ldprintf(DEBUG_CONF,"%s : %s\n",valueTemp->field,valueTemp->fvalue);
+					strncpy(vfvalue,needle,r-needle);
+					vfvalue[r-needle] = '\0';
+					if(strcmp(vfvalue,"PRI")==0){
+						valueTemp->fvalue = PRI;
+					}else if(strcmp(vfvalue,"FAC")==0){
+						valueTemp->fvalue = FAC;
+					}else if(strcmp(vfvalue,"DATE")==0){
+						valueTemp->fvalue = DATE;
+					}else if(strcmp(vfvalue,"HOST")==0){
+						valueTemp->fvalue = HOST;
+					}else if(strcmp(vfvalue,"LEFT")==0){
+						valueTemp->fvalue = LEFT;
+					}else{
+						printf ("error config file with %s:wrong parameter \n",line);
+						exit(1);
+					}
+					ldprintf(DEBUG_CONF,"%s : %d\n",valueTemp->field,valueTemp->fvalue);
 					/*detect the end of function*/
 				    for (; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
@@ -1051,6 +1074,7 @@ int assemLog(msg,sqlMsg,asp)
 	struct value_list *valueTemp;
 	time_t	now;
 	ENTRY *ep;
+	ENTRY *hConst;
 	struct lc_subModule *sp;
 	
 	p = *msg;
@@ -1122,17 +1146,48 @@ int assemLog(msg,sqlMsg,asp)
 		for(;isspace(*q);q++) msglen--;
 		p = q;
 		spvalue[0] = '\0';
+		spfield[0] = '\0';
 		parserTemp = sp->template->pHead;
 		while(!parserTemp){
 			q = strchr(parserTemp->letter);
 			if(parserTemp->field[0] != '\0'){
 				strncpy(fvalue,p,q-p);
 				fvalue[q-p] = '\0';
+				if(spvalue[0]!='\0'){
+					strcat(spvalue,sqlite3_mprintf(", %Q",fvalue));
+				}else{
+					strcat(spvalue,sqlite3_mprintf("%Q",fvalue));
+				}
 				strcat(spvalue,fvalue);
+				if(spfield[0]=='\0'){
+					strcat(spfield,"`");
+				}else{
+					strcat(spfield,",`");
+				}
 				strcat(spfield,parserTemp->field);
+				strcat(spfield,"`");
 			}
 			q++;
 			parserTemp = parserTemp->next;
+		}
+		left = q;
+		valueTemp = sp->template->vHead;
+		while(!valueTemp){
+			switch(valueTemp->fvalue){
+				case DATE:
+					break;
+				case HOST:
+					break;
+				case PRI:
+					break;
+				case FAC:
+					break;
+				case LEFT:
+					break;
+				default:
+					
+			}
+			valueTemp = valueTemp->next;
 		}
 		return 1;
 	}
