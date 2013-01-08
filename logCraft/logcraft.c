@@ -151,6 +151,8 @@ int sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
+
+int usage();
 /*
  *parser the log
  */

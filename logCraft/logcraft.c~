@@ -151,6 +151,7 @@ int sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
+int usage();
 /*
  *parser the log
  */
@@ -247,9 +248,7 @@ int main(int argc,char *argv[])
 				 * Not reached unless something major went wrong.  5
 				 * minutes should be a fair amount of time to wait.
 				 * Please note that this procedure is important since
-				 * the father must not exit before syslogd isn't
-				 * initialized or the klogd won't be able to flush its
-				 * logs.  -Joey
+				 * the father must not exit before logcraft isn't initialized
 				 */
 				exit(1);
 			}
