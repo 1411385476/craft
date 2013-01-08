@@ -135,7 +135,7 @@ void printline(char *msg); //insert log into cache
 
 void lc_transfer();
 int assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100],struct lc_subModule **asp);
-void sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
+int sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
@@ -699,13 +699,15 @@ void cfline(line)
 					while(smodulePl!=NULL){
 						if(strcmp(tName,smodulePl->name)==0){
 							smoduleTemp->template = smodulePl;
+							break;
 						}
 						smodulePl = smodulePl->next;
 					}
-					if(smoduleTemp->pModule==NULL){
-						printf ("error config file with %s:log module %s does not exist!\n",line,hName);
+					if(smoduleTemp->template==NULL){
+						printf ("error config file with %s:log template %s does not exist!\n",line,tName);
 						exit(1);
 					}
+					ldprintf(DEBUG_CONF,"%d\n",smoduleTemp->template->vHead->fvalue);					
 					/*insert into the link*/
 					if(smoduleHead==NULL){
 						smoduleHead = smoduleTemp;
@@ -1044,12 +1046,13 @@ void lc_transfer(){
 		/*check and split the message assem it into a sql sentence*/
 		if(assemLog(&cline,&sline,&sp)){
 			/*insert message into db*/
-			sql_insert(sp,&sline);
-			/*Q5*/
-			sp->mid = 10000;
-			/*Q6*/
-			sp->rid = (sp->rid+1)%sp->mid;
-			lc_stat.lc_db_succ++;
+			if(sql_insert(sp,&sline)){
+				/*Q6*/
+				sp->rid = (sp->rid+1)%sp->mid;
+				lc_stat.lc_db_succ++;
+			}else{
+				lc_stat.lc_db_fail++;
+			}
 		}else{
 			lc_stat.lc_db_fail++;
 		}
@@ -1067,7 +1070,7 @@ int assemLog(msg,sqlMsg,asp)
 	char (*sqlMsg)[MSGLEN+100];
 	struct lc_subModule **asp;
 {
-	register char *p, *q,*left;
+	register char *p, *q,*left,*test;
 	register unsigned char c;
 	int pri;
 	int fac, prilev,msglen;
@@ -1117,8 +1120,7 @@ int assemLog(msg,sqlMsg,asp)
 	}else{
 		return 0;
 	}
-	/*get the rid*/
-	sprintf(ridChar,"%d",sp->rid);
+	
 	(void) time(&now); //timestamp
 	sprintf(dateChar,"%d",now);
 	/* extract facility and priority level */
@@ -1157,41 +1159,50 @@ int assemLog(msg,sqlMsg,asp)
 	if(ep){
 		sp = (struct lc_subModule *)ep->data;
 		*asp = sp;
+
 		ldprintf(DEBUG_TRAN,"%s\n",sp->subName);
+		
+		/*get the rid*/
+		sprintf(ridChar,"%d",sp->rid+1);
+		
 		/*split the log then assemble the sql*/
 		for(;isspace(*q);q++) msglen--;
 		spvalue[0] = '\0';
 		spfield[0] = '\0';
 		parserTemp = sp->template->pHead;
-		while(!parserTemp){
+		while(parserTemp){
 			p = q;
 			q = strchr(q,parserTemp->letter);
-			if(parserTemp->field[0] != '\0'){
-				strncpy(fvalue,p,q-p);
-				fvalue[q-p] = '\0';
-				if(spvalue[0]!='\0'){
-					strcat(spvalue,sqlite3_mprintf(", %Q",fvalue));
-				}else{
-					strcat(spvalue,sqlite3_mprintf("%Q",fvalue));
-				}
-				strcat(spvalue,fvalue);
-				if(spfield[0]=='\0'){
+			if(q!=NULL){
+				if(parserTemp->field[0] != '\0'){
+					strncpy(fvalue,p,q-p);
+					fvalue[q-p] = '\0';
+					if(spvalue[0]!='\0'){
+						strcat(spvalue,sqlite3_mprintf(", %Q",fvalue));
+					}else{
+						strcat(spvalue,sqlite3_mprintf("%Q",fvalue));
+					}
+					if(spfield[0]=='\0'){
+						strcat(spfield,"`");
+					}else{
+						strcat(spfield,",`");
+					}
+					strcat(spfield,parserTemp->field);
 					strcat(spfield,"`");
-				}else{
-					strcat(spfield,",`");
 				}
-				strcat(spfield,parserTemp->field);
-				strcat(spfield,"`");
+				q++;
+			}else{
+				q = p;
 			}
-			q++;
 			parserTemp = parserTemp->next;
 		}
 		left = q;
+		ldprintf(DEBUG_TRAN,"[spvalue]: %s\n",spvalue);
 		svvalue[0] = '\0';
 		svfield[0] = '\0';
 		valueTemp = sp->template->vHead;
-		while(!valueTemp){
-			if(svvalue[0]!='\0'){
+		while(valueTemp){
+			if(valueTemp->fvalue!=LEFT&&svvalue[0]!='\0'){
 				strcat(svvalue,", ");
 			}
 			switch(valueTemp->fvalue){
@@ -1216,7 +1227,9 @@ int assemLog(msg,sqlMsg,asp)
 					strcat(svfield,"`");
 					break;
 				case HOST:
+					strcat(svvalue,"'");
 					strcat(svvalue,hostname);
+					strcat(svvalue,"'");
 					if(svfield[0]=='\0'){
 						strcat(svfield,"`");
 					}else{
@@ -1273,7 +1286,7 @@ int assemLog(msg,sqlMsg,asp)
 			strcat(svvalue,", ");
 		}
 		strcat(svvalue,spvalue);
-		sprintf(*sqlMsg,"replace %s(%s) values(%s);",sp->template->table,svfield,svvalue);
+		sprintf(*sqlMsg,"replace into %s(%s) values(%s);",sp->template->table,svfield,svvalue);
 		ldprintf(DEBUG_TRAN,"%s\n",sqlMsg);
 		return 1;
 	}
@@ -1292,7 +1305,7 @@ void lc_backup(){
 
 
 /*insert sql insto db*/
-void sql_insert(sp,msg)
+int sql_insert(sp,msg)
 	struct lc_subModule *sp;
 	char (*msg)[MSGLEN+100];
 {
@@ -1300,11 +1313,15 @@ void sql_insert(sp,msg)
 	char msg_temp[MSGLEN+100];
 	char * pErrMsg = 0;
 
-	//sprintf(msg_temp,"insert into nat(`content`) values(%s);",*msg);
-	//sqlite3_exec( sp->pModule->db,*msg, 0, 0, &pErrMsg);
-	ldprintf(DEBUG_TRAN,"%s\n",msg);
+	sqlite3_exec( sp->pModule->db,*msg, 0, 0, &pErrMsg);
+	/*Q5*/
+	sp->mid = 10000;
 	/*Q7 check the error message*/
-	return;
+	if(pErrMsg){
+		ldprintf(DEBUG_TRAN,"%s : %s\n",pErrMsg,msg);
+		return 0;		
+	}
+	return 1;
 }
 /*log error from logcraft*/
 void logerror(type)

@@ -32,10 +32,19 @@ logcraft: a software for process Log from system
 #define DEBUG_MAIN	1
 #define DEBUG_TRAN	2
 #define DEBUG_CONF	3
+/*define log constant parameter*/
+#define RID		0	/* table log id*/
+#define DATE	1	/* unused entry */
+#define HOST	2	/* regular file */
+#define PRI		3	/* terminal */
+#define FAC		4	/* console terminal */
+#define LEFT	5	/* remote machine */
 
+/**/
 static int debugging_on = 0;
 
 struct hsearch_data *htab;
+
 
 static int cache_rflag = 0;
 pthread_t transfer_tid;
@@ -93,7 +102,7 @@ struct parser_list{
 };
 struct value_list{
 	char field[50];
-	char fvalue[15];
+	int fvalue;
 	struct value_list *next;
 };
 struct lc_subModuleTemp{
@@ -110,6 +119,8 @@ struct lc_subModule{
 	char subName[30];
 	struct lc_module *pModule;
 	struct lc_subModuleTemp *template;
+	int mid;
+	int rid;
 	struct lc_subModule *next;
 } *smoduleHead,*smoduleTail;
 
@@ -124,7 +135,7 @@ void printline(char *msg); //insert log into cache
 
 void lc_transfer();
 int assemLog(char (*msg)[MSGLEN],char (*sline)[MSGLEN+100],struct lc_subModule **asp);
-void sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
+int sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
@@ -146,7 +157,7 @@ int main(int argc,char *argv[])
 	struct event *ev;
 	/**/
 	if(argc>=2){
-		debugging_on = 2;
+		debugging_on = atoi(argv[1]);
 	}
 
 	/*initial the config*/
@@ -177,7 +188,7 @@ int main(int argc,char *argv[])
 		oops("bind",3);
 	}
 	listen(sock,6);
-	/* 设置客户端socket为非阻塞模式。 */
+	/* set nonblock*/
     if (setnonblock(sock) < 0)
             oops("failed to set logcraft socket non-blocking",4);
 	/*start the transfer thread*/
@@ -293,7 +304,7 @@ void lc_init()
 		hashlen++;
 		sp = sp->next;
 	}
-	/*create hash table*/
+	/*create log module  hash table*/
 	hash_create(hashlen+5,htab);
 	sp = smoduleHead;
 	while(sp!=NULL){
@@ -312,6 +323,7 @@ void cfline(line)
 	char pvt[30]; //template paser value
 	char bkName[30];
 	char dbSize[15];
+	char vfvalue[15];
 	int module_mark = 0;
 	struct lc_module *moduleTemp;
 	struct lc_subModule *smoduleTemp;
@@ -550,14 +562,30 @@ void cfline(line)
 					*/
 					for (++r; isspace(*r)&&r<p ; ++r);
 					if(*r!='$'){
-						printf ("error config file with %s:wrong parameter \n",line);
+						printf ("error config file with %s:parameter missing $ \n",line);
 						exit(1);
 					}
 					/*initialize the field value*/
 					for (needle = ++r; *r!=')'&&!isspace(*r)&&r<p ; ++r);
-					strncpy(valueTemp->fvalue,needle,r-needle);
-					valueTemp->fvalue[r-needle] = '\0';
-					ldprintf(DEBUG_CONF,"%s : %s\n",valueTemp->field,valueTemp->fvalue);
+					strncpy(vfvalue,needle,r-needle);
+					vfvalue[r-needle] = '\0';
+					if(strcmp(vfvalue,"RID")==0){
+						valueTemp->fvalue = RID; //Q4 we must check RID existence
+					}else if(strcmp(vfvalue,"PRI")==0){
+						valueTemp->fvalue = PRI;
+					}else if(strcmp(vfvalue,"FAC")==0){
+						valueTemp->fvalue = FAC;
+					}else if(strcmp(vfvalue,"DATE")==0){
+						valueTemp->fvalue = DATE;
+					}else if(strcmp(vfvalue,"HOST")==0){
+						valueTemp->fvalue = HOST;
+					}else if(strcmp(vfvalue,"LEFT")==0){
+						valueTemp->fvalue = LEFT;
+					}else{
+						printf ("error config file with %s:wrong parameter \n",line);
+						exit(1);
+					}
+					ldprintf(DEBUG_CONF,"%s : %d\n",valueTemp->field,valueTemp->fvalue);
 					/*detect the end of function*/
 				    for (; isspace(*r)&&r<p ; ++r);
 					if(*r!=')'){
@@ -671,13 +699,15 @@ void cfline(line)
 					while(smodulePl!=NULL){
 						if(strcmp(tName,smodulePl->name)==0){
 							smoduleTemp->template = smodulePl;
+							break;
 						}
 						smodulePl = smodulePl->next;
 					}
-					if(smoduleTemp->pModule==NULL){
-						printf ("error config file with %s:log module %s does not exist!\n",line,hName);
+					if(smoduleTemp->template==NULL){
+						printf ("error config file with %s:log template %s does not exist!\n",line,tName);
 						exit(1);
 					}
+					ldprintf(DEBUG_CONF,"%d\n",smoduleTemp->template->vHead->fvalue);					
 					/*insert into the link*/
 					if(smoduleHead==NULL){
 						smoduleHead = smoduleTemp;
@@ -1016,8 +1046,13 @@ void lc_transfer(){
 		/*check and split the message assem it into a sql sentence*/
 		if(assemLog(&cline,&sline,&sp)){
 			/*insert message into db*/
-			sql_insert(sp,&sline);
-			lc_stat.lc_db_succ++;
+			if(sql_insert(sp,&sline)){
+				/*Q6*/
+				sp->rid = (sp->rid+1)%sp->mid;
+				lc_stat.lc_db_succ++;
+			}else{
+				lc_stat.lc_db_fail++;
+			}
 		}else{
 			lc_stat.lc_db_fail++;
 		}
@@ -1035,15 +1070,24 @@ int assemLog(msg,sqlMsg,asp)
 	char (*sqlMsg)[MSGLEN+100];
 	struct lc_subModule **asp;
 {
-	register char *p, *q,*left;
+	register char *p, *q,*left,*test;
 	register unsigned char c;
 	int pri;
 	int fac, prilev,msglen;
 	char sqlTemp[MSGLEN+100];
+	char spfield[MSGLEN+100];
+	char spvalue[MSGLEN+100];
+	char svfield[MSGLEN+100];
+	char svvalue[MSGLEN+100];
+	char fvalue[MSGLEN+100];
 	char hostname[50];
 	char nMark[20];
+	char ridChar[15],priChar[4],facChar[4],dateChar[15];
+	struct parser_list *parserTemp;
+	struct value_list *valueTemp;
 	time_t	now;
 	ENTRY *ep;
+	ENTRY *hConst;
 	struct lc_subModule *sp;
 	
 	p = *msg;
@@ -1076,18 +1120,23 @@ int assemLog(msg,sqlMsg,asp)
 	}else{
 		return 0;
 	}
-
-	(void) time(&now); //timestamp
 	
+	(void) time(&now); //timestamp
+	sprintf(dateChar,"%d",now);
 	/* extract facility and priority level */
 	fac = LOG_FAC(pri);
 	prilev = LOG_PRI(pri);
+	sprintf(priChar,"%d",prilev);
+	sprintf(facChar,"%d",fac);
 	/*hostname*/
 	for(;isspace(*q);q++) msglen--;
 	p = q;
 	for(;!isspace(*q);q++) msglen--;
 	strncpy(hostname,p,q-p);
 	hostname[q-p] = '\0';
+	if(p==q){
+		strcpy(hostname,"local");
+	}
 	/*kernel mark/ submodule mark*/
 	for(;isspace(*q);q++) msglen--;
 	p = q;
@@ -1110,11 +1159,135 @@ int assemLog(msg,sqlMsg,asp)
 	if(ep){
 		sp = (struct lc_subModule *)ep->data;
 		*asp = sp;
+
 		ldprintf(DEBUG_TRAN,"%s\n",sp->subName);
-		/*split the log then assemble the sql*/
 		
+		/*get the rid*/
+		sprintf(ridChar,"%d",sp->rid+1);
+		
+		/*split the log then assemble the sql*/
 		for(;isspace(*q);q++) msglen--;
+		spvalue[0] = '\0';
+		spfield[0] = '\0';
+		parserTemp = sp->template->pHead;
+		while(parserTemp){
+			p = q;
+			q = strchr(q,parserTemp->letter);
+			if(q!=NULL){
+				if(parserTemp->field[0] != '\0'){
+					strncpy(fvalue,p,q-p);
+					fvalue[q-p] = '\0';
+					if(spvalue[0]!='\0'){
+						strcat(spvalue,sqlite3_mprintf(", %Q",fvalue));
+					}else{
+						strcat(spvalue,sqlite3_mprintf("%Q",fvalue));
+					}
+					if(spfield[0]=='\0'){
+						strcat(spfield,"`");
+					}else{
+						strcat(spfield,",`");
+					}
+					strcat(spfield,parserTemp->field);
+					strcat(spfield,"`");
+				}
+				q++;
+			}else{
+				q = p;
+			}
+			parserTemp = parserTemp->next;
+		}
 		left = q;
+		ldprintf(DEBUG_TRAN,"[spvalue]: %s\n",spvalue);
+		svvalue[0] = '\0';
+		svfield[0] = '\0';
+		valueTemp = sp->template->vHead;
+		while(valueTemp){
+			if(valueTemp->fvalue!=LEFT&&svvalue[0]!='\0'){
+				strcat(svvalue,", ");
+			}
+			switch(valueTemp->fvalue){
+				case RID:
+					strcat(svvalue,ridChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
+					break;
+				case DATE:
+					strcat(svvalue,dateChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
+					break;
+				case HOST:
+					strcat(svvalue,"'");
+					strcat(svvalue,hostname);
+					strcat(svvalue,"'");
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
+					break;
+				case PRI:
+					strcat(svvalue,priChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
+					break;
+				case FAC:
+					strcat(svvalue,facChar);
+					if(svfield[0]=='\0'){
+						strcat(svfield,"`");
+					}else{
+						strcat(svfield,",`");
+					}
+					strcat(svfield,valueTemp->field);
+					strcat(svfield,"`");
+					break;
+				case LEFT:
+					if(spvalue[0]!='\0'){
+						strcat(spvalue,sqlite3_mprintf(", %Q",left));
+					}else{
+						strcat(spvalue,sqlite3_mprintf("%Q",left));
+					}
+					if(spfield[0]=='\0'){
+						strcat(spfield,"`");
+					}else{
+						strcat(spfield,",`");
+					}
+					strcat(spfield,valueTemp->field);
+					strcat(spfield,"`");
+					break;
+				default:
+					ldprintf(DEBUG_TRAN,"valueTemp has some problems in assemLog!\n");
+					
+			}
+			valueTemp = valueTemp->next;
+		}
+		if(spfield[0]!='\0'){
+			strcat(svfield,", ");
+		}
+		strcat(svfield,spfield);
+		if(spvalue[0]!='\0'){
+			strcat(svvalue,", ");
+		}
+		strcat(svvalue,spvalue);
+		sprintf(*sqlMsg,"replace into  %s(%s) values(%s);",sp->template->table,svfield,svvalue);
+		ldprintf(DEBUG_TRAN,"%s\n",sqlMsg);
 		return 1;
 	}
 	return 0;
@@ -1132,7 +1305,7 @@ void lc_backup(){
 
 
 /*insert sql insto db*/
-void sql_insert(sp,msg)
+int sql_insert(sp,msg)
 	struct lc_subModule *sp;
 	char (*msg)[MSGLEN+100];
 {
@@ -1140,10 +1313,15 @@ void sql_insert(sp,msg)
 	char msg_temp[MSGLEN+100];
 	char * pErrMsg = 0;
 
-	sprintf(msg_temp,"insert into nat(`content`) values('%s');",*msg);
-	sqlite3_exec( sp->pModule->db,msg_temp, 0, 0, &pErrMsg);
-	/*check the error message*/
-	return;
+	sqlite3_exec( sp->pModule->db,*msg, 0, 0, &pErrMsg);
+	/*Q5*/
+	sp->mid = 10000;
+	/*Q7 check the error message*/
+	if(pErrMsg){
+		ldprintf(DEBUG_TRAN,"%s : %s\n",pErrMsg,msg);
+		return 0;		
+	}
+	return 1;
 }
 /*log error from logcraft*/
 void logerror(type)

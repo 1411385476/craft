@@ -4,13 +4,21 @@ kmark{
 module{
 SECURITY 10240000 /var/log/security.db;
 CONFIG 102400000 /var/log/config.db;
-TRAFFIC 1024000000 /var/log/security.db;
-AUDIT 10240000000 /var/log/security.db;
+TRAFFIC 1024000000 /var/log/traffic.db;
+AUDIT 10240000000 /var/log/audit.db;
 sfsfs 102a sfsf;
 }
 
 template template1{
-	
+	parser('@',`user`);
+	parser(' ',`module`);
+	value(`rid`,$RID);
+	value(`content`,$LEFT);
+	value(`datetime`,$DATE);
+	value(`host`,$HOST);
+	value(`priority`,$PRI);
+	value(`facility`,$FAC);
+	table(`config`);
 }
 template template2{
 	parser('@',`user`);
