@@ -171,7 +171,8 @@ int main(int argc,char *argv[])
 			break;
 		case 'd':		/* debug */
 			Debug = 1;					
-			debugging_on = atoi(optarg)%3+1;
+			debugging_on = atoi(optarg)%4;
+			if(debugging_on==0) debugging_on = 1;
 			break;
 		case 'f':		/* configuration file */
 			ConfFile = optarg;

@@ -171,7 +171,8 @@ int main(int argc,char *argv[])
 			break;
 		case 'd':		/* debug */
 			Debug = 1;					
-			debugging_on = atoi(optarg)%3+1;
+			debugging_on = atoi(optarg)%4;
+			if(debugging_on==0) debugging-on = 1;
 			break;
 		case 'f':		/* configuration file */
 			ConfFile = optarg;
@@ -232,7 +233,7 @@ int main(int argc,char *argv[])
 /*define usage print the infomation of logcraft */
 int usage()
 {
-	fprintf(stderr, "usage: logcraft [-drvh]  [-n] \n[-f conffile]\n");
+	fprintf(stderr, "usage: logcraft [-dv]  [-n] [-f conffile]\n");
 	exit(1);
 }
 /**
