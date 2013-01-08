@@ -25,10 +25,10 @@ logcraft: a software for process Log from system
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define SOCKNAME "/var/log/log.socket"
 #ifndef _PATH_LOGCONF 
-#define _PATH_LOGCONF	"/home/scrooph/craft/logCraft/logcraft.conf"
+#define _PATH_LOGCONF	"/etc/logcraft.conf"
 #endif
 #define CONT_LINE	1		/* Allow continuation lines */
-#define Debug		1		/* debug flag */
+
 #define DEBUG_MAIN	1
 #define DEBUG_TRAN	2
 #define DEBUG_CONF	3
@@ -40,9 +40,13 @@ logcraft: a software for process Log from system
 #define FAC		4	/* console terminal */
 #define LEFT	5	/* remote machine */
 
-/**/
-static int debugging_on = 0;
+#define VERSION "1.0"
+#define PATCHLEVEL "0"
 
+/**/
+static int Debug = 0;		/* debug flag */
+static int debugging_on = 0;
+int	NoFork = 0; 		/* don't fork - don't run in daemon mode */
 struct hsearch_data *htab;
 
 
@@ -155,10 +159,35 @@ int main(int argc,char *argv[])
 	time_t		now;
 	int  msgnum	= 0;
 	struct event *ev;
+	int ch;
+	extern int optind;
+	extern char *optarg;
 	/**/
-	if(argc>=2){
-		debugging_on = atoi(argv[1]);
-	}
+	/*get the config of syslogd*/
+	while ((ch = getopt(argc, argv, "a:d:f:nv")) != EOF)
+		switch((char)ch) {
+		case 'a':
+			fprintf(stderr, "ignoring %s\n", optarg);
+			break;
+		case 'd':		/* debug */
+			Debug = 1;					
+			debugging_on = atoi(optarg)%3+1;
+			break;
+		case 'f':		/* configuration file */
+			ConfFile = optarg;
+			break;
+		case 'n':		/* don't fork */
+			NoFork = 1;
+			break;
+		case 'v':
+			printf("logcraft %s.%s\n", VERSION, PATCHLEVEL);
+			exit (0);
+		case '?':
+		default:
+			usage();
+		}
+	if ((argc -= optind))
+		usage();
 
 	/*initial the config*/
 	bkInstant.bk_style = 0;
@@ -200,7 +229,12 @@ int main(int argc,char *argv[])
 	event_add(ev,NULL);
 	event_dispatch();
 }
-
+/*define usage print the infomation of logcraft */
+int usage()
+{
+	fprintf(stderr, "usage: logcraft [-dv]  [-n] [-f conffile]\n");
+	exit(1);
+}
 /**
  * set this socket be nonblock
  */
