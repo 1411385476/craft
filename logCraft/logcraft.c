@@ -2,10 +2,12 @@
 logcraft: a software for process Log from system
 */
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <sys/ioctl.h>
 #include <stddef.h>
 #include <sys/un.h>
 #include <event.h>
@@ -23,10 +25,15 @@ logcraft: a software for process Log from system
 #define MAXLINE 1024
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
-#define SOCKNAME "/var/log/log.socket"
+#define SOCKNAME	"/var/log/log.socket"
 #ifndef _PATH_LOGCONF 
 #define _PATH_LOGCONF	"/etc/logcraft.conf"
 #endif
+#define _PATH_LOGPID	"/var/run/logcraft.pid"
+#ifndef _PATH_TTY
+#define _PATH_TTY	"/dev/tty"
+#endif
+
 #define CONT_LINE	1		/* Allow continuation lines */
 
 #define DEBUG_MAIN	1
@@ -57,6 +64,7 @@ pthread_t backup_tid;
 pthread_attr_t backup_attr;
 
 char *ConfFile = _PATH_LOGCONF;
+char *PidFile = _PATH_LOGPID;
 char kmark[20];
 short int confStatus 	= 0;//config module
 char log_line[MSGLEN];
@@ -143,10 +151,38 @@ int sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
-/*parser the log*/
+/*
+ *parser the log
+ */
 void *parser(char symbol,char (*line)[MSGLEN],char (*lineLeft)[MSGLEN],\
              char (*lineRight)[MSGLEN]);
 
+/*	Reads the specified pidfile and returns the read pid.
+ * 0 is returned if either there's no pidfile, it's empty
+ * or no pid can be read.
+ */
+int read_pid (char *pidfile);
+
+/* 	Reads the pid using read_pid and looks up the pid in the process
+ * table (using /proc) to determine if the process already exists. If
+ * so 1 is returned, otherwise 0.
+ */
+int check_pid (char *pidfile);
+
+/* 	Writes the pid to the specified file. If that fails 0 is
+ * returned, otherwise the pid.
+ */
+int write_pid (char *pidfile);
+
+/* 	Remove the the specified file. The result from unlink(2)
+ * is returned
+ */
+int remove_pid (char *pidfile);
+
+#ifndef TESTING
+void doexit(int sig);
+#endif
+void untty();
 /*the core function of main:
 init the arguments and environment
 get message from other process (syslog-ng / web)
@@ -162,6 +198,11 @@ int main(int argc,char *argv[])
 	int ch;
 	extern int optind;
 	extern char *optarg;
+	int num_fds,i;
+#ifndef TESTING
+	pid_t ppid = getpid();
+	pid_t pid;
+#endif
 	/**/
 	/*get the config of syslogd*/
 	while ((ch = getopt(argc, argv, "a:d:f:nv")) != EOF)
@@ -190,9 +231,70 @@ int main(int argc,char *argv[])
 	if ((argc -= optind))
 		usage();
 
+#ifndef TESTING
+	if ( !(Debug || NoFork) )
+	{
+		ldprintf(DEBUG_MAIN,"Checking pidfile.\n");
+		if (!check_pid(PidFile))
+		{
+			signal (SIGTERM, doexit);
+			if (pid = fork()) {
+				/*
+				 * Parent process
+				 */		
+				sleep(300);
+				/*
+				 * Not reached unless something major went wrong.  5
+				 * minutes should be a fair amount of time to wait.
+				 * Please note that this procedure is important since
+				 * the father must not exit before logcraft isn't initialized
+				 */
+				exit(1);
+			}
+			signal (SIGTERM, SIG_DFL);
+			num_fds = getdtablesize();
+			for (i= 0; i < num_fds; i++)
+				(void) close(i);
+			untty();
+		}
+		else
+		{
+			fputs("logcraft: Already running.\n", stderr);
+			exit(1);
+		}
+	}
+
+	/* tuck my process id away */
+	if ( !Debug )
+	{
+		ldprintf(DEBUG_MAIN,"Writing pidfile.\n");
+		if (!check_pid(PidFile))
+		{
+			if (!write_pid(PidFile))
+			{
+				ldprintf(DEBUG_MAIN,"Can't write pid.\n");
+				if (getpid() != ppid)
+					kill (ppid, SIGTERM);
+				exit(1);
+			}
+			
+		}
+		else
+		{
+			ldprintf(DEBUG_MAIN,"Pidfile (and pid) already exist.\n");
+			if (getpid() != ppid)
+				kill (ppid, SIGTERM);
+			exit(1);
+		}
+	} /* if ( !Debug ) */
+#endif
 	/*initial the config*/
 	bkInstant.bk_style = 0;
 	lc_init();
+#ifndef TESTING
+	if (getpid() != ppid)
+		kill (ppid, SIGTERM);
+#endif
 	//return 1;
 	/**/
 	log_cache		= log_cache_start;
@@ -1410,3 +1512,124 @@ static void ldprintf(int mark,char *fmt,...){
 		return;
 	}
 }
+
+int read_pid (char *pidfile)
+{
+  FILE *f;
+  int pid;
+
+  if (!(f=fopen(pidfile,"r")))
+    return 0;
+  fscanf(f,"%d", &pid);
+  fclose(f);
+  return pid;
+}
+
+/* check_pid
+ *
+ * Reads the pid using read_pid and looks up the pid in the process
+ * table (using /proc) to determine if the process already exists. If
+ * so 1 is returned, otherwise 0.
+ */
+int check_pid (char *pidfile)
+{
+  int pid = read_pid(pidfile);
+
+  /* Amazing ! _I_ am already holding the pid file... */
+  if ((!pid) || (pid == getpid ()))
+    return 0;
+
+  /*
+   * The 'standard' method of doing this is to try and do a 'fake' kill
+   * of the process.  If an ESRCH error is returned the process cannot
+   * be found -- GW
+   */
+  /* But... errno is usually changed only on error.. */
+  if (kill(pid, 0) && errno == ESRCH)
+	  return(0);
+
+  return pid;
+}
+
+/* write_pid
+ *
+ * Writes the pid to the specified file. If that fails 0 is
+ * returned, otherwise the pid.
+ */
+int write_pid (char *pidfile)
+{
+  FILE *f;
+  int fd;
+  int pid;
+
+  if ( ((fd = open(pidfile, O_RDWR|O_CREAT|O_TRUNC, 0644)) == -1)
+       || ((f = fdopen(fd, "r+")) == NULL) ) {
+      fprintf(stderr, "Can't open or create %s.\n", pidfile);
+      return 0;
+  }
+
+  if (flock(fd, LOCK_EX|LOCK_NB) == -1) {
+      fscanf(f, "%d", &pid);
+      fclose(f);
+      printf("Can't lock, lock is held by pid %d.\n", pid);
+      return 0;
+  }
+
+  pid = getpid();
+  if (!fprintf(f,"%d\n", pid)) {
+      printf("Can't write pid , %s.\n", strerror(errno));
+      close(fd);
+      return 0;
+  }
+  fflush(f);
+
+  if (flock(fd, LOCK_UN) == -1) {
+      printf("Can't unlock pidfile %s, %s.\n", pidfile, strerror(errno));
+      close(fd);
+      return 0;
+  }
+  close(fd);
+
+  return pid;
+}
+
+/* remove_pid
+ *
+ * Remove the the specified file. The result from unlink(2)
+ * is returned
+ */
+int remove_pid (char *pidfile)
+{
+  return unlink (pidfile);
+}
+
+#ifndef TESTING
+void doexit(sig)
+	int sig;
+{
+	exit (0);
+}
+#endif
+
+void untty()
+#ifdef SYSV
+{
+	if ( !Debug ) {
+		setsid();
+	}
+	return;
+}
+
+#else
+{
+	int i;
+
+	if ( !Debug ) {
+		i = open(_PATH_TTY, O_RDWR);
+		if (i >= 0) {
+			(void) ioctl(i, (int) TIOCNOTTY, (char *)0);
+			(void) close(i);
+		}
+	}
+}
+#endif
