@@ -1174,7 +1174,8 @@ void lc_transfer(){
 		memset (cline, 0, sizeof(cline));
 		memset (sline, 0, sizeof(sline));
 		strcpy(cline,*log_cache_out);
-		log_cache_out = log_cache_start + (++log_cache_out - log_cache_start)%CACHESIZE;
+		i = (++log_cache_out - log_cache_start)%CACHESIZE;
+		log_cache_out = log_cache_start + i;
 		ldprintf(DEBUG_TRAN,"%s\n",cline);
 		
 		/*check and split the message assem it into a sql sentence*/

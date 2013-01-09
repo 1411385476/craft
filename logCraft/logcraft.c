@@ -1148,10 +1148,10 @@ void printline(msg)
 	}else{
 		memset(*log_cache,0,sizeof(*log_cache));
 		strcpy(*log_cache,msg);
+		ldprintf(DEBUG_MAIN,"%s\n",*log_cache);
 		i = (++log_cache - log_cache_start)%CACHESIZE;
 		log_cache = log_cache_start + i;
 	}
-	ldprintf(DEBUG_MAIN,"%s\n",*log_cache);
 
 	return;
 }
