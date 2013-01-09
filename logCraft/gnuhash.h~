@@ -24,7 +24,7 @@ ENTRY  *hash_add(char *key, void *value, struct hsearch_data *tab)
         ENTRY item, *ret ;
         item.key = key ;
         item.data= value  ;
-        hsearch_r(item, ENTER, &ret, tab);
+        int x=  hsearch_r(item, ENTER, &ret, tab);
         return ret ;
 }
 
@@ -32,20 +32,20 @@ ENTRY *hash_find(char *key, struct hsearch_data *tab)
 {
         ENTRY item, *ret ;
         item.key = key ;
-        hsearch_r(item, FIND, &ret, tab);
+        int x= hsearch_r(item, FIND, &ret, tab);
         return ret ;
 }
 ENTRY  *hash_addentry(ENTRY item, struct hsearch_data *tab)
 {
         ENTRY *ret ;
-        hsearch_r(item, ENTER, &ret, tab);
+        int x =  hsearch_r(item, ENTER, &ret, tab);
         return ret ;
 }
 
 ENTRY *hash_findentry(ENTRY item, struct hsearch_data *tab)
 {
         ENTRY *ret ;
-        hsearch_r(item, FIND, &ret, tab);
+        int x= hsearch_r(item, FIND, &ret, tab);
         return ret ;
 }
 

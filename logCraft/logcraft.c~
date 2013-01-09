@@ -8,9 +8,12 @@ logcraft: a software for process Log from system
 #include <sys/socket.h>
 #include <sys/errno.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
 #include <stddef.h>
+#include <ctype.h>
 #include <sys/un.h>
 #include <event.h>
+#include <pthread.h>
 #include <sqlite3.h>
 #include <time.h>
 #include <signal.h>
@@ -19,7 +22,6 @@ logcraft: a software for process Log from system
 #include <syslog.h>
 #include "gnuhash.h"
 
-#define oops(m,x){ perror(m); return; }
 #define CACHESIZE 10000
 #define MSGLEN 512
 #define MAXLINE 1024
@@ -56,8 +58,6 @@ static int debugging_on = 0;
 int	NoFork = 0; 		/* don't fork - don't run in daemon mode */
 struct hsearch_data *htab;
 
-
-static int cache_rflag = 0;
 pthread_t transfer_tid;
 pthread_attr_t transfer_attr;
 pthread_t backup_tid;
@@ -151,12 +151,8 @@ int sql_insert(struct lc_subModule *sp,char (*msg)[MSGLEN+100]);
 
 static void ldprintf(int mark,char *fmt,...);
 void logerror(char *type); //output syslog
+
 int usage();
-/*
- *parser the log
- */
-void *parser(char symbol,char (*line)[MSGLEN],char (*lineLeft)[MSGLEN],\
-             char (*lineRight)[MSGLEN]);
 
 /*	Reads the specified pidfile and returns the read pid.
  * 0 is returned if either there's no pidfile, it's empty
@@ -184,6 +180,10 @@ int remove_pid (char *pidfile);
 void doexit(int sig);
 #endif
 void untty();
+
+int oops(char *m,int x);
+
+
 /*the core function of main:
 init the arguments and environment
 get message from other process (syslog-ng / web)
@@ -193,8 +193,6 @@ int main(int argc,char *argv[])
 	char sockname[]	= SOCKNAME;
 	struct 		sockaddr_un addr;
 	socklen_t 	addrlen;
-	time_t		now;
-	int  msgnum	= 0;
 	struct event *ev;
 	int ch;
 	extern int optind;
@@ -202,7 +200,6 @@ int main(int argc,char *argv[])
 	int num_fds,i;
 #ifndef TESTING
 	pid_t ppid = getpid();
-	pid_t pid;
 #endif
 	/**/
 	/*get the config of syslogd*/
@@ -239,7 +236,7 @@ int main(int argc,char *argv[])
 		if (!check_pid(PidFile))
 		{
 			signal (SIGTERM, doexit);
-			if (pid = fork()) {
+			if (fork()) {
 				/*
 				 * Parent process
 				 */		
@@ -296,7 +293,6 @@ int main(int argc,char *argv[])
 	if (getpid() != ppid)
 		kill (ppid, SIGTERM);
 #endif
-	//return 1;
 	/**/
 	log_cache		= log_cache_start;
 	log_cache_out	= log_cache_start;
@@ -326,12 +322,13 @@ int main(int argc,char *argv[])
             oops("failed to set logcraft socket non-blocking",4);
 	/*start the transfer thread*/
 	pthread_attr_init(&transfer_attr);
-	pthread_create(&transfer_tid,&transfer_attr,lc_transfer,NULL);
+	pthread_create(&transfer_tid,&transfer_attr,(void *)lc_transfer,NULL);
 	/*Init libevent*/
 	event_init();
 	event_set(ev,sock,EV_READ|EV_PERSIST,(void *)lc_accept,ev);
 	event_add(ev,NULL);
 	event_dispatch();
+	return 0;
 }
 /*define usage print the infomation of logcraft */
 int usage()
@@ -462,7 +459,6 @@ void cfline(line)
 	char bkName[30];
 	char dbSize[15];
 	char vfvalue[15];
-	int module_mark = 0;
 	struct lc_module *moduleTemp;
 	struct lc_subModule *smoduleTemp;
 	struct lc_subModuleTemp *smodulePl;
@@ -587,7 +583,7 @@ void cfline(line)
 				break;
 			case 3:
 				p = strchr(line,'\0');
-				for (--p; isspace(*r)&&p>line ; --p);
+				for (--p; isspace(*p)&&p>line ; --p);
 				if(*p!=';'){
 					printf ("error config file with %s:missing ; for end \n",line);
 					exit(1);
@@ -861,7 +857,7 @@ void cfline(line)
 				break;
 			case 5:
 				p = strchr(line,'\0');
-				for (--p; isspace(*r)&&p>line ; --p);
+				for (--p; isspace(*p)&&p>line ; --p);
 				if(*p!=';'){
 					printf ("error config file with %s:missing ; for end \n",line);
 					exit(1);
@@ -990,11 +986,7 @@ void cfline(line)
 	}
 	return;
 }
-void *parser(char symbol,char (*line)[MSGLEN],char (*lineLeft)[MSGLEN],\
-             char (*lineRight)[MSGLEN])
-{
-	
-}
+
 
 /*
  *callback function for process the messge from web
@@ -1015,26 +1007,28 @@ void * lc_accept()
 	client_fd = accept(sock,(struct sockaddr *) &addr,(socklen_t *)&addrlen);
 	if (client_fd < 0) {
         oops("accept",10);
-        return;
+        return (void *)0;
     }
 	if (setnonblock(client_fd) < 0)
             oops("failed to set client socket non-blocking\n",11);
 	struct event *ev = malloc(sizeof(struct event));
     event_set(ev, client_fd, EV_READ|EV_PERSIST, (void *) lc_read, ev);
     event_add(ev, NULL);
+	return (void *)0;
 }
 /*
 read syslog from syslog-ng
 */
 void * lc_read(int fd, short event, struct event *arg)
 {
-    int len=0;
+	int len=0;
 	char	msg[MAXLINE+1];
 	memset(msg, 0, sizeof(msg));
 	len = read(fd,msg,MAXLINE-2);
 	ldprintf(DEBUG_MAIN,"^^^^^^^^^^^^^^^^^^^^^\n%s\n~~~~~~~~~~~~~~~~~~~~~\n",msg);
 	updateLog(msg,len);
 	printchopped(msg, len);
+	return (void *)0;
 }
 
 /*chopped the log into line*/
@@ -1147,13 +1141,15 @@ void printline(msg)
 	char * msg;
 {
 	lc_stat.lc_receive++;
+	int i;
 	if(log_cache_out-log_cache==1){
 		lc_stat.lc_drop++;
 		return;
 	}else{
 		memset(*log_cache,0,sizeof(*log_cache));
 		strcpy(*log_cache,msg);
-		log_cache = log_cache_start + (++log_cache - log_cache_start)%CACHESIZE;
+		i = (++log_cache - log_cache_start)%CACHESIZE;
+		log_cache = log_cache_start + i;
 	}
 	ldprintf(DEBUG_MAIN,"%s\n",*log_cache);
 
@@ -1169,7 +1165,7 @@ void lc_transfer(){
 	char cline[MSGLEN];
 	char sline[MSGLEN+100];
 	struct lc_subModule *sp;
-	
+	int i;
 	while(1){
 		/*get msg from cache*/
 		if(log_cache-log_cache_out==0){
@@ -1208,9 +1204,9 @@ int assemLog(msg,sqlMsg,asp)
 	char (*sqlMsg)[MSGLEN+100];
 	struct lc_subModule **asp;
 {
-	register char *p, *q,*left,*test;
+	register char *p, *q,*left;
 	register unsigned char c;
-	int pri;
+	int pri=LOG_USER<<3|LOG_NOTICE;
 	int fac, prilev,msglen;
 	char sqlTemp[MSGLEN+100];
 	char spfield[MSGLEN+100];
@@ -1225,13 +1221,11 @@ int assemLog(msg,sqlMsg,asp)
 	struct value_list *valueTemp;
 	time_t	now;
 	ENTRY *ep;
-	ENTRY *hConst;
 	struct lc_subModule *sp;
 	
 	p = *msg;
 
 	if (*p == '<') {
-		pri = 0;
 		while (isdigit(*++p))
 		{
 		   pri = 10 * pri + (*p - '0');
@@ -1260,7 +1254,7 @@ int assemLog(msg,sqlMsg,asp)
 	}
 	
 	(void) time(&now); //timestamp
-	sprintf(dateChar,"%d",now);
+	sprintf(dateChar,"%ld",now);
 	/* extract facility and priority level */
 	fac = LOG_FAC(pri);
 	prilev = LOG_PRI(pri);
@@ -1447,8 +1441,8 @@ int sql_insert(sp,msg)
 	struct lc_subModule *sp;
 	char (*msg)[MSGLEN+100];
 {
-	int i;
-	char msg_temp[MSGLEN+100];
+	//int i;
+	//char msg_temp[MSGLEN+100];
 	char * pErrMsg = 0;
 
 	sqlite3_exec( sp->pModule->db,*msg, 0, 0, &pErrMsg);
@@ -1634,3 +1628,10 @@ void untty()
 	}
 }
 #endif
+
+int 
+oops(char *m,int x)
+{ 
+	perror(m); 
+	return x; 
+}
