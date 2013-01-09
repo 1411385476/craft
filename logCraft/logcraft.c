@@ -25,6 +25,7 @@ logcraft: a software for process Log from system
 #define CACHESIZE 10000
 #define MSGLEN 512
 #define MAXLINE 1024
+#define TSLIMIT 200
 #define DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define SOCKNAME	"/var/log/log.socket"
@@ -105,6 +106,8 @@ struct lc_module{
 	char db_location[256];
 	long long db_size;
 	struct lc_module *next;
+	short int tsflag;
+	short int tscount;
 } *moduleHead,*moduleTail;
 /*the principle of parser and template of sql*/
 struct parser_list{
@@ -1444,11 +1447,24 @@ int sql_insert(sp,msg)
 {
 	//int i;
 	//char msg_temp[MSGLEN+100];
+	int dbsize = 0;
 	char * pErrMsg = 0;
-
+	if(!sp->pModule->tsflag){
+		sqlite3_exec( sp->pModule->db,"begin transaction;");
+	}
 	sqlite3_exec( sp->pModule->db,*msg, 0, 0, &pErrMsg);
-	/*Q5*/
-	sp->mid = 10000;
+	sp->pModule->tscount++;
+	sp->rid++;
+	if(sp->pModule->tscount < TSLIMIT){
+
+		
+	}else{
+		sqlite3_exec( sp->pModule->db,"commit transaction;");
+		dbsize = getDbSize(sp->pModule->db_location);
+		if(dbsize<sp->pModule->db_size){
+			sp->mid++;
+		}
+	}
 	/*Q7 check the error message*/
 	if(pErrMsg){
 		ldprintf(DEBUG_TRAN,"%s : %s\n",pErrMsg,msg);
